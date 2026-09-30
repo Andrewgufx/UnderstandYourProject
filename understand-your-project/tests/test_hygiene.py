@@ -98,6 +98,13 @@ class DocsTests(HygieneBase):
             "CLAUDE.md", "README.md", "docs/deep/nested/more.md", "docs/guide.md", "notes/product-prd.md",
         ])
 
+    def test_finds_every_agent_instruction_file_at_root(self):
+        self.write("AGENTS.md", "")
+        self.write("CLAUDE.md", "")
+        self.write("GEMINI.md", "")
+        self.write("src/GEMINI.md", "")
+        self.assertEqual(find_docs(self.root), ["AGENTS.md", "CLAUDE.md", "GEMINI.md"])
+
     def test_dot_directories_are_pruned(self):
         self.write("README.md", "")
         self.write(".github/design.md", "")

@@ -53,7 +53,7 @@ def find_docs(root: Path) -> List[str]:
                 continue
             rel = name if rel_dir == "" else rel_dir + "/" + name
             upper = name.upper()
-            if depth == 0 and (upper.startswith("README") or name in ("CLAUDE.md", "AGENTS.md")):
+            if depth == 0 and (upper.startswith("README") or name in ("CLAUDE.md", "AGENTS.md", "GEMINI.md")):
                 docs.append(rel)
             elif rel.startswith("docs/"):
                 docs.append(rel)

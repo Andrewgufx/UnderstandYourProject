@@ -6,7 +6,7 @@ user's conversation language. Ask ONE question per message and wait for the answ
 
 ## Step 1: Draft from existing docs
 
-Read the root README, CLAUDE.md and AGENTS.md first (those present in `facts.docs`).
+Read the root README, AGENTS.md, CLAUDE.md and GEMINI.md first (those present in `facts.docs`).
 Then read at most 5 more files from `facts.docs`, preferring names that contain `prd`,
 `spec`, `requirements` or `design`. Skim for purpose and audience only. Write a 2-4
 sentence draft:

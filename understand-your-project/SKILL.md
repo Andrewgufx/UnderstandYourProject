@@ -1,6 +1,7 @@
 ---
 name: understand-your-project
 description: Analyze a project's code architecture, judge it against what the project actually needs, and write a plain-language report with concrete fixes. Use when the user asks whether their project structure or architecture is good, wants to understand how their code is organized, asks if their code is a mess (屎山), or says things like "analyze my project structure", "review my architecture", "understand my project", "is my code structure ok".
+compatibility: Requires Python 3.8 or newer and permission to run shell commands.
 ---
 
 # Understand Your Project
@@ -15,12 +16,15 @@ you a few questions about the project, then write a report."
 
 ## Step 1: Collect facts
 
-Run from anywhere; pass the project root as the argument. Write the JSON to a scratch
-directory outside the project (a temp dir), never into the project:
+Run from anywhere; pass the project root as the argument. `<skill_dir>` is the
+directory that contains this SKILL.md; use its absolute path. Write the JSON to a
+scratch directory outside the project (a temp dir), never into the project:
 
 ```bash
-python3 <this skill's directory>/scripts/collect_facts.py <project_root> > <scratch_dir>/facts.json
+python3 <skill_dir>/scripts/collect_facts.py <project_root> > <scratch_dir>/facts.json
 ```
+
+If `python3` is not found, try `python`.
 
 Read the JSON one field at a time with small calls, never by printing the whole file:
 
@@ -48,7 +52,7 @@ reads from this file.
 
 ## Step 2: Understand the needs
 
-Follow `references/interview.md` exactly: read the root README, CLAUDE.md and AGENTS.md,
+Follow `references/interview.md` exactly: read the root README, AGENTS.md, CLAUDE.md and GEMINI.md,
 then at most five more files from `facts.docs`, present a draft understanding, then ask
 the four questions one at a time. Build the
 requirements profile and state it back. If the user declines, use the default profile

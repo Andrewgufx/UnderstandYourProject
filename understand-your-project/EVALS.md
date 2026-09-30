@@ -4,7 +4,8 @@ Run the skill on each fixture with the default profile (`small_group`, `iteratin
 no pain points) and compare the findings in `ARCHITECTURE_REVIEW.md` against the table.
 Re-run after any change to `SKILL.md`, `references/checklist.md` or the script.
 
-How to run: in a Claude Code session, `cd` into the fixture and say
+How to run: in an agent session (Claude Code, Codex, Cursor or Gemini CLI, with the
+skill installed by `install.py`), `cd` into the fixture and say
 "analyze my project structure". Answer the interview with: Q1 = confirm the draft,
 Q2=B, Q3=B, Q4=D. Run on a copy of the fixture outside the repo so the report does not
 land in the tracked tree.
@@ -20,6 +21,18 @@ Also check for every run:
 - No secret value appears anywhere in the report.
 - Section 5 has one entry per must_fix/should_fix finding and each has a paste-ready task.
 - The report is in the language you spoke to the agent in.
+
+## Cross-agent check
+
+Run once per agent after any change to `SKILL.md` frontmatter or `install.py`:
+
+1. `python3 install.py --agent <claude|codex|cursor|gemini>`, then restart the agent.
+2. Confirm the skill is listed: `/skills` in Claude Code, Codex and Gemini CLI; type
+   `/` in Cursor's Agent chat.
+3. In a copy of `tests/fixtures/cyclic-node`, say "analyze my project structure". The
+   agent must announce the skill, run `collect_facts.py` from the installed directory,
+   and ask the first interview question.
+4. Record the agent name in the Notes column below.
 
 Record results here with the date:
 
