@@ -86,6 +86,13 @@ class AliasTests(unittest.TestCase):
         (self.root / "tsconfig.json").write_text("not json at all {{{")
         self.assertEqual(load_path_aliases(self.root), {})
 
+    def test_alias_key_glob_is_not_treated_as_comment(self):
+        (self.root / "tsconfig.json").write_text(
+            '{"compilerOptions": {"baseUrl": ".", "paths": {"@/*": ["./src/*"]}},\n'
+            ' "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"], // trailing\n'
+            ' "exclude": ["node_modules"]}')
+        self.assertEqual(load_path_aliases(self.root), {"@/": "src/"})
+
 
 if __name__ == "__main__":
     unittest.main()

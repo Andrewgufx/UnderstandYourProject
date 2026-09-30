@@ -60,8 +60,12 @@ def extract_import_specs(text: str, language: str) -> List[str]:
 
 
 def _lenient_json(text: str) -> Optional[dict]:
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    text = re.sub(r"(^|[^:\\])//[^\n]*", r"\1", text)
+    text = re.sub(
+        r'("(?:\\.|[^"\\])*")|/\*.*?\*/|//[^\n]*',
+        lambda m: m.group(1) or "",
+        text,
+        flags=re.DOTALL,
+    )
     text = re.sub(r",(\s*[}\]])", r"\1", text)
     try:
         data = json.loads(text)
