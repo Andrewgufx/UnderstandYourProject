@@ -288,7 +288,7 @@ agent 严格按五步执行，每步产物是下一步输入。
 
 | 编号 | 名字 | 证据 | 阈值 | 基础严重程度 |
 |---|---|---|---|---|
-| E1 | 目录按文件类型堆而不按功能分 | `tree` 中顶层或二层目录名全是 `components`、`utils`、`hooks`、`types`、`helpers` 这类类型名且单目录文件超过 20 | 存在即报 | 提示；`collaborative` 档位为建议改 |
+| E1 | 目录按文件类型堆而不按功能分 | `tree` 中顶层或二层目录名是 `components`、`utils`、`hooks`、`types`、`helpers` 之一且单目录文件超过 20 | 存在即报 | 提示 |
 | E2 | 配置和常量散落各处 | `config_files` | 超过 3 个且分布在不同目录 | 提示 |
 
 ### 档位调整规则
@@ -296,12 +296,12 @@ agent 严格按五步执行，每步产物是下一步输入。
 按顺序应用，每步最多调一级，最低为"提示"，最高为"必须改"：
 
 1. `scale_tier == personal`：D 和 E 维度降一级，D2 除外。
-2. `evolution_tier == frozen`：E 维度全部降为"提示"。
-3. `evolution_tier == collaborative`：C3、D1、E1 升一级。
-4. `evolution_tier in (launching, collaborative)`：D1、D3 升一级。
-5. `pain_points` 含"改一处坏一片"：A、B 维度升一级。
-6. `pain_points` 含"AI 越来越改不动"：A1、A4、E1 升一级。
-7. 被 pain_points 命中的问题在报告里排最前。
+2. `evolution_tier == collaborative`：C3、D1、E1 升一级。
+3. `evolution_tier in (launching, collaborative)`：D1、D3 升一级。
+4. `pain_points` 含"改一处坏一片"：A、B 维度升一级。
+5. `pain_points` 含"AI 越来越改不动"：A1、A4、E1 升一级。
+6. 最后封顶：`evolution_tier == frozen` 时 E 维度全部设为"提示"。
+7. 被规则 4 或 5 命中的问题在各自严重程度分组内排最前。
 
 ## 8. 参考架构 `reference-architectures.md`
 
@@ -317,7 +317,7 @@ agent 严格按五步执行，每步产物是下一步输入。
 
 ### 使用规则
 
-- 识别不出类型时不给目标结构，只输出清单结果并说明。
+- 按 T5、T1、T2、T3、T4 的顺序匹配，取第一个命中的模板；T5 的条件是前端框架加任一后端框架，或 monorepo。识别不出类型时不给目标结构，只输出清单结果并说明。
 - "建议的目标结构"只包含当前项目已暴露问题所涉及的部分。干净的部分不动，不为套模板要求用户重排。
 - 目标结构里每个新增或移动的目录都要对应报告第 4 节的某个问题编号。
 

@@ -32,7 +32,7 @@ may apply:
 - C. I plan to launch it properly or charge for it
 - D. Other people will work on the code with me
 
-**Q4. What hurts most right now?** Offer these options:
+**Q4. What hurts most right now?** Offer these options; more than one may apply:
 - A. Changing one thing breaks something else
 - B. The AI is getting worse at making changes to it
 - C. It is slow
@@ -52,6 +52,9 @@ State the profile back to the user in one short paragraph before analysis begins
 
 ## If the user declines or skips questions
 
-Use `scale_tier = small_group` and `evolution_tier = iterating`, `pain_points = []`.
-Mark the report header with "Assumptions: judged using default profile (small group,
-actively iterating) because the interview was skipped."
+If the whole interview is skipped, use `scale_tier = small_group`,
+`evolution_tier = iterating`, `pain_points = []`, and `purpose` = the Step 1 draft
+marked "(unconfirmed)". If only some questions are skipped, apply the default for
+those fields only. Whenever any default is used, mark the report header with
+"Assumptions: judged using default profile (small group, actively iterating) because
+the interview was skipped or incomplete."

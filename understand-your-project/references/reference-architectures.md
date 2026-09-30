@@ -2,8 +2,8 @@
 
 Use these to draw the "suggested target structure" in the report. Rules:
 
-1. Pick the template by the rule in each heading. If none matches, skip the target
-   structure entirely and say so in the report.
+1. Check the templates in this order and take the first match: T5, then T1, T2, T3, T4.
+   If none matches, skip the target structure entirely and say so in the report.
 2. Only include directories that relate to a finding in the report. Do not ask the
    user to rearrange parts that are already fine.
 3. Every added or moved directory in the target structure must be annotated with the
@@ -83,8 +83,9 @@ Skip when small: a single-purpose script under about 200 lines can stay one file
 Layer order: `config` < `io` < `core` < `cli` < `scripts`.
 
 ## T5. Full-stack single repo
-Matches when both a front-end template (T1) and a back-end template (T2 or T3) match,
-or `monorepo` is true.
+Matches when `frameworks` contains `next` or `react` together with any back-end
+framework (`express fastify nest koa hono fastapi django flask`), or when `monorepo`
+is true.
 
 ```
 apps/

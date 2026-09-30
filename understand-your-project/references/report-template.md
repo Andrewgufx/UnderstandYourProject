@@ -7,7 +7,9 @@ item IDs (A1, B2...) untouched.
 Writing rules:
 - No jargon. If a technical word is unavoidable, explain it in parentheses the first time.
 - Every finding cites paths and numbers from the facts JSON. No "it feels messy".
-- Never invent a path. Every path must appear in the JSON.
+- Every path cited as evidence must appear in the JSON. Paths that do not exist yet
+  (in fixes and in the target structure) are always written with the suffix
+  ` (proposed)`.
 - Section 2 is for a reader who has never opened the code. Write it like you are
   showing someone around a house.
 - After writing the file, summarize in chat in at most five sentences and give the path.
@@ -23,10 +25,10 @@ Generated: <YYYY-MM-DD>
 
 ## Section 1: One-line verdict
 
-Pick exactly one:
-- **Healthy** when there are zero `must_fix` and at most 2 `should_fix`.
-- **A few things to fix** otherwise, unless:
-- **Needs a proper tidy-up** when there is at least one `must_fix` or more than 5 `should_fix`.
+Check in this order and stop at the first match:
+1. **Needs a proper tidy-up** when there is at least one `must_fix`, or more than 5 `should_fix`.
+2. **Healthy** when there are zero `must_fix` and at most 2 `should_fix`.
+3. **A few things to fix** otherwise.
 
 Follow with one sentence saying why, naming the biggest item.
 
@@ -43,6 +45,9 @@ src/                 118 files   everything the app is made of
   lib/                12 files   helpers with no UI
 ```
 
+If `facts.tree` is empty (all source files sit in the project root), list the entries
+of `facts.largest_files` instead of drawing a tree.
+
 ## Section 3: What we assumed about your needs
 
 Restate the requirements profile: purpose, who uses it, where it is going, what hurts.
@@ -50,8 +55,7 @@ Ask the reader to correct anything wrong, because every judgment below depends o
 
 ## Section 4: What we found
 
-Group by severity in this order: must_fix, should_fix, note. Within a group, items
-raised by the user's pain points come first, then by ID. Each finding uses exactly this
+Group by severity in this order: must_fix, should_fix, note. Within each severity group, items raised by the user's pain points come first, then by ID. Each finding uses exactly this
 shape:
 
 ```

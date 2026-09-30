@@ -21,15 +21,17 @@ Run from the project root the user wants analyzed:
 python3 <this skill's directory>/scripts/collect_facts.py <project_root>
 ```
 
-Save the JSON output; every later step reads from it.
+Keep the JSON in your context or in a scratch directory outside the project; never
+write it into the project. Every later step reads from it.
 
 - If the script exits non-zero, show the user the `error:` line from stderr and stop.
   Do not count files by hand instead. Without reliable facts there is no report.
 - If `scale.out_of_scope` is true, tell the user now that the project exceeds this
   version's per-file limit and that you will review top-level structure only.
-- If `project_type.languages` contains neither `javascript`, `typescript` nor `python`,
-  tell the user this version covers JS/TS and Python and proceed with the generic
-  checklist only.
+- If `project_type.languages` contains none of `javascript`, `typescript`, `python`,
+  tell the user this version covers JS/TS and Python, evaluate only D1 to D4 and E1
+  (see the last section of `references/checklist.md`), and skip the reference
+  architecture.
 
 ## Step 2: Understand the needs
 
@@ -62,7 +64,8 @@ fix in Section 5 is a task the user may hand to an agent later; that is their de
 ## Rules that always apply
 
 - Evidence or nothing. A finding without a path or number from the JSON is deleted.
-- No invented paths. If you cannot find it in the JSON, it does not exist.
+- Evidence paths come from the JSON only. Any path you propose that does not exist
+  yet carries the suffix ` (proposed)`.
 - Plain words. Explain a technical term in parentheses the first time it appears.
 - One interview question per message.
 - The script counts; you judge. Never re-derive counts by reading files yourself.

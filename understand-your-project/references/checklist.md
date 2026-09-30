@@ -18,8 +18,8 @@ severity / what happens if ignored / usual fix.
 ### A1. Giant file
 - **Plain words:** One file does far too many things. Nobody, human or AI, can hold it in their head.
 - **Evidence:** `largest_files[].lines`
-- **Threshold:** over 500 lines is a candidate; over 1000 lines always reported.
-- **Base severity:** should_fix; must_fix when over 1000 lines.
+- **Threshold:** any file over 500 lines is reported.
+- **Base severity:** should_fix for 501 to 1000 lines; must_fix over 1000 lines.
 - **If ignored:** Every change touches the same file, merge conflicts and regressions pile up, AI edits get sloppy.
 - **Usual fix:** Split by responsibility (routes, data access, business rules, UI) into separate files under a folder named after the feature.
 
@@ -29,7 +29,7 @@ severity / what happens if ignored / usual fix.
 - **Threshold:** any such file.
 - **Base severity:** should_fix.
 - **If ignored:** You cannot change where data comes from without rewriting screens; testing the screen requires a live database.
-- **Usual fix:** Move fetching and queries into a `lib/`, `services/` or `api/` module and call it from the component.
+- **Usual fix:** Move fetching and queries into a `lib/` or `services/` module and call it from the component.
 
 ### A3. Business logic lives in routes or pages
 - **Plain words:** The rules of your app are written inside the request handlers or page files instead of a place of their own.
@@ -67,7 +67,7 @@ severity / what happens if ignored / usual fix.
 
 ### B3. Dependency direction is inverted
 - **Plain words:** Low-level helper code reaches up and imports from screens or routes.
-- **Evidence:** `dependency.edges[]` compared with the layer order of the matching template in `reference-architectures.md`. Generic order, low to high: `utils`/`lib`/`shared` < `services`/`db`/`models`/`data` < `components`/`hooks` < `pages`/`app`/`routes`/`api`/`views`. An edge whose `from` directory is lower than its `to` directory is inverted.
+- **Evidence:** `dependency.edges[]`. A file's layer is the first path segment (after dropping a leading `src/`) that appears in the layer order; files with no such segment have no layer and their edges are ignored. Use the matched template's layer order from `reference-architectures.md`; if no template matched, use this generic order, low to high: `utils`/`lib`/`shared` < `services`/`db`/`models`/`data` < `components`/`hooks` < `pages`/`app`/`routes`/`api`/`views`. An edge whose `from` layer is lower than its `to` layer is inverted.
 - **Threshold:** any inverted edge.
 - **Base severity:** should_fix.
 - **If ignored:** Nothing is reusable; the helper cannot be tested without the whole app.
@@ -137,9 +137,9 @@ severity / what happens if ignored / usual fix.
 
 ### E1. Folders grouped by file type instead of feature
 - **Plain words:** Everything is in `components/`, `utils/`, `hooks/`, `types/`; a single feature is scattered across all of them.
-- **Evidence:** `tree[]` entries at depth 1 or 2 whose last path segment is one of `components utils hooks types helpers services models` and whose `files` exceed 20.
-- **Threshold:** any such directory, and no feature-named directories at the same depth.
-- **Base severity:** note; should_fix when `evolution_tier == collaborative`.
+- **Evidence:** `tree[]` entries at depth 1 or 2 whose last path segment is one of `components utils hooks types helpers` and whose `files` exceed 20.
+- **Threshold:** any such directory.
+- **Base severity:** note.
 - **If ignored:** Adding a feature means touching six folders; deleting one means hunting through all of them.
 - **Usual fix:** Group by feature (`features/todos/`, `features/auth/`) with shared code in `shared/`.
 
@@ -157,12 +157,12 @@ Apply in this order. Each step moves severity by at most one level. Floor is `no
 ceiling is `must_fix`. D2 is never lowered.
 
 1. `scale_tier == personal`: lower every D and E item by one level, except D2.
-2. `evolution_tier == frozen`: set every E item to `note`.
-3. `evolution_tier == collaborative`: raise C3, D1, E1 by one level.
-4. `evolution_tier in (launching, collaborative)`: raise D1, D3 by one level.
-5. `pain_points` contains `breaks_elsewhere`: raise every A and B item by one level.
-6. `pain_points` contains `ai_struggles`: raise A1, A4, E1 by one level.
-7. Items touched by rules 5 or 6 are listed first in the report's findings section.
+2. `evolution_tier == collaborative`: raise C3, D1, E1 by one level.
+3. `evolution_tier in (launching, collaborative)`: raise D1, D3 by one level.
+4. `pain_points` contains `breaks_elsewhere`: raise every A and B item by one level.
+5. `pain_points` contains `ai_struggles`: raise A1, A4, E1 by one level.
+6. Final cap, applied after all of the above: if `evolution_tier == frozen`, set every E item to `note`.
+7. Items touched by rules 4 or 5 are listed first within their severity group in the report.
 
 ## Out-of-scope projects
 
@@ -172,4 +172,11 @@ State in the report that per-file analysis was not performed.
 ## Unreliable dependency data
 
 When `dependency.unresolved_imports` exceeds 30% of the total number of edges plus
-unresolved imports, mark every B item "needs confirmation" and say why.
+unresolved imports, mark every B item "needs confirmation" and say why. These items
+still count toward the verdict at their assigned severity.
+
+## Projects that are not JS/TS or Python
+
+When `project_type.languages` contains none of `javascript`, `typescript`, `python`,
+evaluate only D1, D2, D3, D4 and E1. No template applies; say in the report that this
+version has reference architectures for JS/TS and Python only.
