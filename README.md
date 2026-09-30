@@ -33,5 +33,4 @@ python3 -m unittest discover -s understand-your-project/tests -v
 python3 understand-your-project/scripts/collect_facts.py path/to/any/project
 ```
 
-Design: `docs/superpowers/specs/2026-09-30-understand-your-project-design.md`.
 Manual evaluation: `understand-your-project/EVALS.md`.
