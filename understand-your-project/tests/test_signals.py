@@ -106,6 +106,16 @@ class SimilarFilenameTests(unittest.TestCase):
         self.assertEqual(similar_filenames(files), [])
 
 
+class SimilarFilenameLanguageTests(unittest.TestCase):
+    def test_same_stem_in_different_languages_is_not_a_group(self):
+        files = [sf("apps/web/src/i18n/findings.tsx", ""), sf("services/api/findings.py", "", "python")]
+        self.assertEqual(similar_filenames(files), [])
+
+    def test_js_and_ts_count_as_one_language(self):
+        files = [sf("src/utils.js", "", "javascript"), sf("src/lib/helpers.ts", "")]
+        self.assertEqual(similar_filenames(files), [["src/lib/helpers.ts", "src/utils.js"]])
+
+
 class RepeatedFunctionTests(unittest.TestCase):
     def test_names_in_three_or_more_files(self):
         files = [
@@ -144,8 +154,22 @@ class NamingTests(unittest.TestCase):
             sf("src/my-feature/index.ts", ""),
         ]
         self.assertEqual(naming_styles(files), {
-            "file_case_styles": {"PascalCase": 1, "kebab-case": 1, "snake_case": 1},
-            "dir_case_styles": {"kebab-case": 1},
+            "javascript_typescript": {
+                "file_case_styles": {"PascalCase": 1, "kebab-case": 1, "snake_case": 1},
+                "dir_case_styles": {"kebab-case": 1},
+            },
+        })
+
+    def test_styles_are_counted_per_language(self):
+        files = [
+            sf("services/api/app/user_service.py", "", "python"),
+            sf("services/api/app/data_models.py", "", "python"),
+            sf("apps/web/src/UserPanel.tsx", ""),
+            sf("apps/web/src/DataGrid.tsx", ""),
+        ]
+        self.assertEqual(naming_styles(files), {
+            "python": {"file_case_styles": {"snake_case": 2}, "dir_case_styles": {}},
+            "javascript_typescript": {"file_case_styles": {"PascalCase": 2}, "dir_case_styles": {}},
         })
 
 

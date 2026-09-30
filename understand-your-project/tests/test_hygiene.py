@@ -139,6 +139,18 @@ class HygieneTests(HygieneBase):
         self.assertTrue(result["has_format_config"])
         self.assertEqual(result["config_files"], ["app/constants.py", "app/settings.py"])
 
+    def test_nested_lint_and_format_config_is_found(self):
+        self.write("services/api/pyproject.toml", "[tool.ruff]\nline-length = 100\n")
+        self.write("services/api/app/main.py", "")
+        self.write("apps/web/package.json", "{}")
+        self.write("apps/web/.prettierrc", "{}")
+        self.write("apps/web/src/a.ts", "")
+        self.write("node_modules/dep/.eslintrc.json", "{}")
+        files, _ = walk_project(self.root)
+        result = hygiene(self.root, files)
+        self.assertTrue(result["has_lint_config"])
+        self.assertTrue(result["has_format_config"])
+
     def test_bare_project(self):
         self.write("main.py", "")
         files, _ = walk_project(self.root)

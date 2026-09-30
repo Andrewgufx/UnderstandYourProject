@@ -33,7 +33,7 @@ severity / what happens if ignored / usual fix.
 
 ### A3. Business logic lives in routes or pages
 - **Plain words:** The rules of your app are written inside the request handlers or page files instead of a place of their own.
-- **Evidence:** `largest_files[]` entries with a path segment (a directory name, or the file name without its extension) equal to one of `page pages route routes views api handlers`, and whose `lines` exceed 300. Match whole segments, not substrings: `src/api/users.ts` and `app/page.tsx` match; `src/apiClient.ts` and `rapid/x.py` do not.
+- **Evidence:** `largest_files[]` entries with a path segment (a directory name, or the file name without its extension) equal to one of `page pages route routes views api handlers main app server`, and whose `lines` exceed 300. Match whole segments, not substrings: `src/api/users.ts` and `app/page.tsx` match; `src/apiClient.ts` and `rapid/x.py` do not.
 - **Threshold:** any such file.
 - **Base severity:** should_fix.
 - **If ignored:** The same rule gets copied into the next route; fixing it once no longer fixes it everywhere.
@@ -67,7 +67,7 @@ severity / what happens if ignored / usual fix.
 
 ### B3. Dependency direction is inverted
 - **Plain words:** Low-level helper code reaches up and imports from screens or routes.
-- **Evidence:** `dependency.edges[]`. To find a file's layer, drop a leading `src/`, compare the file name without its extension, and scan the path segments left to right. At each position try the segment joined with the next one (`shared/lib`), then the segment alone. The first hit in the layer order is the file's layer. Files with no hit have no layer and their edges are ignored. Use the matched template's layer order from `reference-architectures.md`; if no template matched, use this generic order, low to high: `utils`/`lib`/`shared` < `services`/`db`/`models`/`data` < `components`/`hooks` < `pages`/`app`/`routes`/`api`/`views`. An edge whose `from` layer is lower than its `to` layer is inverted.
+- **Evidence:** `dependency.edges[]`. To find a file's layer, drop a leading `src/`, compare the file name without its extension, and scan the path segments left to right. At each position try the segment joined with the next one (`shared/lib`), then the segment alone. The first hit in the layer order is the file's layer. Files with no hit have no layer and their edges are ignored. Use the matched template's layer order from `reference-architectures.md`; if no template matched, use this generic order, low to high: `utils`/`lib`/`shared` < `services`/`db`/`models`/`data`/`api` < `components`/`hooks` < `pages`/`app`/`routes`/`views`. A front-end `api/` or `services/` directory is a client that calls the back end, so it sits in the second layer and components may import it. An edge whose `from` layer is lower than its `to` layer is inverted.
 - **Threshold:** any inverted edge.
 - **Base severity:** should_fix.
 - **If ignored:** Nothing is reusable; the helper cannot be tested without the whole app.
@@ -93,8 +93,8 @@ severity / what happens if ignored / usual fix.
 
 ### C3. Inconsistent naming
 - **Plain words:** Some files are `userService.ts`, others `user_service.ts`, others `user-service.ts`.
-- **Evidence:** `naming.file_case_styles`, `naming.dir_case_styles`.
-- **Threshold:** within either map, the second most common style is over 20% of the total count, and the total classified count in that map is at least 10.
+- **Evidence:** `naming` is keyed by language family (`python`, `javascript_typescript`); each entry has `file_case_styles` and `dir_case_styles`. Judge each language family on its own; never compare Python names with JS/TS names.
+- **Threshold:** within any one map of one language family, the second most common style is over 20% of the total count, and the total classified count in that map is at least 10.
 - **Base severity:** note.
 - **If ignored:** Harder to find files; AI guesses wrong paths.
 - **Usual fix:** Pick one convention per language (kebab-case for JS/TS files, snake_case for Python) and rename gradually.

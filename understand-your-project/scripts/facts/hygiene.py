@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import fnmatch
-import os
 import re
 from pathlib import Path
 from typing import Dict, List
 
-from .walk import SourceFile, ignored_dir_names, is_test_path, prune_dirs
+from .project_type import find_manifests
+from .walk import SourceFile, is_test_path, walk_tree
 
 _SECRET_PATTERNS = [
     re.compile(r"""(?i)(api[_-]?key|secret|token|password|passwd)\w*['"]?\s*[:=]\s*['"](?!https?://)[^'"\s${}]{16,}['"]"""),
@@ -45,16 +45,13 @@ def suspected_secrets(source_files: List[SourceFile]) -> List[str]:
 
 
 def find_docs(root: Path) -> List[str]:
-    ignored = ignored_dir_names(root)
     docs: List[str] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = prune_dirs(dirnames, ignored)
-        rel_dir = Path(dirpath).relative_to(root).as_posix()
-        depth = 0 if rel_dir == "." else rel_dir.count("/") + 1
-        for name in sorted(filenames):
+    for _, rel_dir, filenames in walk_tree(root):
+        depth = 0 if rel_dir == "" else rel_dir.count("/") + 1
+        for name in filenames:
             if not name.lower().endswith(".md") or name in _DOC_EXCLUDE:
                 continue
-            rel = name if rel_dir == "." else rel_dir + "/" + name
+            rel = name if rel_dir == "" else rel_dir + "/" + name
             upper = name.upper()
             if depth == 0 and (upper.startswith("README") or name in ("CLAUDE.md", "AGENTS.md")):
                 docs.append(rel)
@@ -102,8 +99,9 @@ def committed_env_files(root: Path) -> List[str]:
 
 
 def hygiene(root: Path, source_files: List[SourceFile]) -> Dict:
-    pyproject = _read(root / "pyproject.toml") if (root / "pyproject.toml").is_file() else ""
-    setup_cfg = _read(root / "setup.cfg") if (root / "setup.cfg").is_file() else ""
+    config_dirs = sorted({root} | {m.parent for m in find_manifests(root)}, key=str)
+    pyproject = "\n".join(_read(d / "pyproject.toml") for d in config_dirs if (d / "pyproject.toml").is_file())
+    setup_cfg = "\n".join(_read(d / "setup.cfg") for d in config_dirs if (d / "setup.cfg").is_file())
     test_paths = sorted(f.path for f in source_files if is_test_path(f.path))
     config_files = sorted(
         f.path for f in source_files
@@ -116,8 +114,8 @@ def hygiene(root: Path, source_files: List[SourceFile]) -> Dict:
         "test_paths": test_paths,
         "has_env_example": any((root / n).is_file() for n in sorted(_ENV_TEMPLATES)),
         "has_gitignore": (root / ".gitignore").is_file(),
-        "has_lint_config": _any_glob(root, _LINT_GLOBS) or "[tool.ruff]" in pyproject or "[flake8]" in setup_cfg,
-        "has_format_config": _any_glob(root, _FORMAT_GLOBS) or "[tool.black]" in pyproject or "[tool.ruff.format]" in pyproject,
+        "has_lint_config": any(_any_glob(d, _LINT_GLOBS) for d in config_dirs) or "[tool.ruff]" in pyproject or "[flake8]" in setup_cfg,
+        "has_format_config": any(_any_glob(d, _FORMAT_GLOBS) for d in config_dirs) or "[tool.black]" in pyproject or "[tool.ruff.format]" in pyproject,
         "suspected_secrets": suspected_secrets(source_files),
         "config_files": config_files,
     }

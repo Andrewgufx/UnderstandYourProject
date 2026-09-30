@@ -88,7 +88,8 @@ Layer order: `config` < `io` < `core` < `cli` < `scripts`.
 ## T5. Full-stack single repo
 Matches when `frameworks` contains `next` or `react` together with any back-end
 framework (`express fastify nest koa hono fastapi django flask`), or when `monorepo`
-is true.
+is true. The script reads manifests up to three directories deep, so a repo with
+`apps/web/package.json` and `services/api/pyproject.toml` matches here.
 
 ```
 apps/

@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
-from .walk import SourceFile
+from .walk import SourceFile, iter_named_files
 
 JS_PACKAGE_TO_FRAMEWORK = {
     "next": "next", "react": "react", "vue": "vue", "nuxt": "nuxt",
@@ -17,6 +17,17 @@ JS_PACKAGE_TO_FRAMEWORK = {
 }
 PY_FRAMEWORKS = ["fastapi", "django", "flask", "streamlit", "typer", "click"]
 PY_MANIFESTS = ["pyproject.toml", "requirements.txt", "setup.py", "Pipfile"]
+MANIFEST_NAMES = ["package.json"] + PY_MANIFESTS
+MANIFEST_MAX_DEPTH = 3
+
+
+def find_manifests(root: Path) -> List[Path]:
+    """Every package.json / Python manifest at directory depth <= 3, ignored dirs excluded."""
+    found = []
+    for path in iter_named_files(root, MANIFEST_NAMES):
+        if len(path.relative_to(root).parts) - 1 <= MANIFEST_MAX_DEPTH:
+            found.append(path)
+    return found
 
 
 def _read(path: Path) -> str:
@@ -69,11 +80,14 @@ def _project_name(root: Path) -> str:
     return _pyproject_name(root) or root.name
 
 
-def _js_frameworks(root: Path, detected_from: List[str]) -> Set[str]:
-    data = load_package_json(root)
+def _js_frameworks(directory: Path, root: Path, detected_from: List[str]) -> Set[str]:
+    manifest = directory / "package.json"
+    if not manifest.is_file():
+        return set()
+    data = load_package_json(directory)
     if data is None:
         return set()
-    detected_from.append("package.json")
+    detected_from.append(manifest.relative_to(root).as_posix())
     deps: Set[str] = set()
     for key in ("dependencies", "devDependencies", "peerDependencies"):
         section = data.get(key) or {}
@@ -82,13 +96,13 @@ def _js_frameworks(root: Path, detected_from: List[str]) -> Set[str]:
     return {fw for pkg, fw in JS_PACKAGE_TO_FRAMEWORK.items() if pkg in deps}
 
 
-def _py_frameworks(root: Path, detected_from: List[str]) -> Set[str]:
+def _py_frameworks(directory: Path, root: Path, detected_from: List[str]) -> Set[str]:
     found: Set[str] = set()
     for name in PY_MANIFESTS:
-        path = root / name
+        path = directory / name
         if not path.is_file():
             continue
-        detected_from.append(name)
+        detected_from.append(path.relative_to(root).as_posix())
         text = _read(path).lower()
         for fw in PY_FRAMEWORKS:
             if re.search(r"(?<![\w-])" + re.escape(fw) + r"(?![\w-])", text):
@@ -96,35 +110,38 @@ def _py_frameworks(root: Path, detected_from: List[str]) -> Set[str]:
     return found
 
 
-def _package_managers(root: Path) -> List[str]:
+def _package_managers(directories: List[Path]) -> List[str]:
     managers: Set[str] = set()
-    if (root / "package.json").is_file():
-        if (root / "pnpm-lock.yaml").is_file():
-            managers.add("pnpm")
-        elif (root / "yarn.lock").is_file():
-            managers.add("yarn")
-        elif (root / "bun.lockb").is_file() or (root / "bun.lock").is_file():
-            managers.add("bun")
-        else:
-            managers.add("npm")
-    if (root / "requirements.txt").is_file():
-        managers.add("pip")
-    pyproject = _read(root / "pyproject.toml") if (root / "pyproject.toml").is_file() else ""
-    if (root / "poetry.lock").is_file() or "[tool.poetry]" in pyproject:
-        managers.add("poetry")
-    if (root / "uv.lock").is_file():
-        managers.add("uv")
-    if (root / "Pipfile").is_file():
-        managers.add("pipenv")
+    for d in directories:
+        if (d / "package.json").is_file():
+            if (d / "pnpm-lock.yaml").is_file():
+                managers.add("pnpm")
+            elif (d / "yarn.lock").is_file():
+                managers.add("yarn")
+            elif (d / "bun.lockb").is_file() or (d / "bun.lock").is_file():
+                managers.add("bun")
+            else:
+                managers.add("npm")
+        if (d / "requirements.txt").is_file() or (d / "pyproject.toml").is_file():
+            managers.add("pip")
+        pyproject = _read(d / "pyproject.toml") if (d / "pyproject.toml").is_file() else ""
+        if (d / "poetry.lock").is_file() or "[tool.poetry]" in pyproject:
+            managers.add("poetry")
+        if (d / "uv.lock").is_file():
+            managers.add("uv")
+        if (d / "Pipfile").is_file():
+            managers.add("pipenv")
     return sorted(managers)
 
 
-def _is_monorepo(root: Path) -> bool:
+def _is_monorepo(root: Path, manifest_dirs: List[Path]) -> bool:
     for name in ("pnpm-workspace.yaml", "lerna.json", "turbo.json"):
         if (root / name).is_file():
             return True
     data = load_package_json(root)
-    return data is not None and "workspaces" in data
+    if data is not None and "workspaces" in data:
+        return True
+    return len(manifest_dirs) > 1
 
 
 def detect_project_type(root: Path, source_files: List[SourceFile]) -> Dict:
@@ -134,12 +151,15 @@ def detect_project_type(root: Path, source_files: List[SourceFile]) -> Dict:
     languages = [lang for lang, _ in sorted(
         lines_by_language.items(), key=lambda kv: (-kv[1], kv[0]))]
     detected_from: List[str] = []
-    frameworks = _js_frameworks(root, detected_from) | _py_frameworks(root, detected_from)
+    manifest_dirs = sorted({m.parent for m in find_manifests(root)}, key=str)
+    frameworks: Set[str] = set()
+    for d in manifest_dirs:
+        frameworks |= _js_frameworks(d, root, detected_from) | _py_frameworks(d, root, detected_from)
     return {
         "name": _project_name(root),
         "languages": languages,
         "frameworks": sorted(frameworks),
-        "package_managers": _package_managers(root),
-        "monorepo": _is_monorepo(root),
+        "package_managers": _package_managers(manifest_dirs),
+        "monorepo": _is_monorepo(root, manifest_dirs),
         "detected_from": sorted(detected_from),
     }

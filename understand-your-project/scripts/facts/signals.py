@@ -92,17 +92,24 @@ def _normalize_stem(path: str) -> str:
     return _SYNONYMS.get(stem, stem)
 
 
+_LANGUAGE_FAMILY = {"javascript": "javascript_typescript", "typescript": "javascript_typescript", "python": "python"}
+
+
+def language_family(language: str) -> str:
+    return _LANGUAGE_FAMILY.get(language, language)
+
+
 def similar_filenames(source_files: List[SourceFile]) -> List[List[str]]:
     """Groups of files whose normalized names match. A group needs at least two distinct
     basenames, so the same file name in different feature folders is not reported."""
-    groups: Dict[str, List[str]] = defaultdict(list)
+    groups: Dict[Tuple[str, str], List[str]] = defaultdict(list)
     for f in source_files:
         if is_test_path(f.path) or "/migrations/" in "/" + f.path:
             continue
-        key = _normalize_stem(f.path)
-        if key in _GENERIC_STEMS:
+        stem = _normalize_stem(f.path)
+        if stem in _GENERIC_STEMS:
             continue
-        groups[key].append(f.path)
+        groups[(language_family(f.language), stem)].append(f.path)
     return sorted(
         sorted(paths) for paths in groups.values()
         if len({p.rsplit("/", 1)[-1] for p in paths}) >= 2
@@ -146,23 +153,31 @@ def classify_name(name: str) -> "str | None":
 
 
 def naming_styles(source_files: List[SourceFile]) -> Dict:
-    file_styles: Counter = Counter()
-    dir_styles: Counter = Counter()
-    seen_dirs = set()
+    """Case-style counts per language family, so Python snake_case and React PascalCase
+    are never compared with each other. Directories count under the family of the files
+    they contain."""
+    per_family: Dict[str, Dict[str, Counter]] = {}
+    seen_dirs: Dict[str, set] = {}
     for f in source_files:
+        family = language_family(f.language)
+        counters = per_family.setdefault(family, {"files": Counter(), "dirs": Counter()})
+        seen = seen_dirs.setdefault(family, set())
         parts = f.path.split("/")
         style = classify_name(parts[-1].split(".")[0])
         if style:
-            file_styles[style] += 1
+            counters["files"][style] += 1
         for depth in range(1, len(parts)):
             directory = "/".join(parts[:depth])
-            if directory in seen_dirs:
+            if directory in seen:
                 continue
-            seen_dirs.add(directory)
+            seen.add(directory)
             style = classify_name(parts[depth - 1])
             if style:
-                dir_styles[style] += 1
+                counters["dirs"][style] += 1
     return {
-        "file_case_styles": dict(sorted(file_styles.items())),
-        "dir_case_styles": dict(sorted(dir_styles.items())),
+        family: {
+            "file_case_styles": dict(sorted(counters["files"].items())),
+            "dir_case_styles": dict(sorted(counters["dirs"].items())),
+        }
+        for family, counters in per_family.items()
     }

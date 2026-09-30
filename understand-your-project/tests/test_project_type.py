@@ -59,6 +59,19 @@ class ProjectTypeTests(unittest.TestCase):
         self.assertTrue(result["monorepo"])
         self.assertEqual(result["package_managers"], ["npm"])
 
+    def test_nested_manifests_are_found_and_merged(self):
+        self.write("apps/web/package.json", json.dumps({"name": "web", "dependencies": {"react": "18"}}))
+        self.write("apps/web/src/App.tsx", "x\n")
+        self.write("services/api/pyproject.toml", '[project]\nname = "api"\ndependencies = ["fastapi"]\n')
+        self.write("services/api/app/main.py", "x\n")
+        self.write("node_modules/dep/package.json", json.dumps({"dependencies": {"vue": "3"}}))
+        result = self.detect()
+        self.assertEqual(result["frameworks"], ["fastapi", "react"])
+        self.assertEqual(result["package_managers"], ["npm", "pip"])
+        self.assertEqual(result["detected_from"], ["apps/web/package.json", "services/api/pyproject.toml"])
+        self.assertTrue(result["monorepo"])
+        self.assertEqual(result["name"], self.root.name)
+
     def test_no_manifests(self):
         self.write("script.py", "x\n")
         result = self.detect()

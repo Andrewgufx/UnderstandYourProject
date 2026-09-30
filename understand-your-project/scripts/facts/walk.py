@@ -49,21 +49,29 @@ def is_test_path(rel_path: str) -> bool:
     return bool(_TEST_FILE_RE.search(parts[-1]))
 
 
-def load_gitignore_dirs(root: Path) -> Set[str]:
-    """Top-level directory names listed in .gitignore without wildcards or slashes."""
+def _gitignore_lines(root: Path) -> List[str]:
     gitignore = root / ".gitignore"
     if not gitignore.is_file():
-        return set()
-    names: Set[str] = set()
+        return []
+    lines = []
     for raw in gitignore.read_text(encoding="utf-8", errors="replace").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or line.startswith("!"):
             continue
         line = line.strip("/")
-        if "/" in line or any(ch in line for ch in "*?["):
-            continue
-        names.add(line)
-    return names
+        if line and not any(ch in line for ch in "*?["):
+            lines.append(line)
+    return lines
+
+
+def load_gitignore_paths(root: Path) -> Set[str]:
+    """Directory paths (posix, relative to root) listed in .gitignore with slashes and no wildcards."""
+    return {line for line in _gitignore_lines(root) if "/" in line}
+
+
+def load_gitignore_dirs(root: Path) -> Set[str]:
+    """Top-level directory names listed in .gitignore without wildcards or slashes."""
+    return {line for line in _gitignore_lines(root) if "/" not in line}
 
 
 def count_lines(path: Path) -> int:
@@ -84,32 +92,46 @@ def prune_dirs(dirnames: List[str], ignored: Set[str]) -> List[str]:
     return sorted(d for d in dirnames if d not in ignored and not d.startswith("."))
 
 
+def walk_tree(root: Path) -> Iterator[Tuple[Path, str, List[str]]]:
+    """Yield (dirpath, rel_dir, sorted filenames) for every non-ignored directory.
+
+    Pruning applies the built-in names, plain .gitignore names, dot-directories, and
+    slashed .gitignore paths such as `apps/desktop/target/` at exactly that path.
+    `rel_dir` is "" for the root."""
+    ignored = ignored_dir_names(root)
+    ignored_paths = load_gitignore_paths(root)
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel_dir = Path(dirpath).relative_to(root).as_posix()
+        rel_dir = "" if rel_dir == "." else rel_dir
+        kept = prune_dirs(dirnames, ignored)
+        if ignored_paths:
+            kept = [d for d in kept if (rel_dir + "/" + d if rel_dir else d) not in ignored_paths]
+        dirnames[:] = kept
+        yield Path(dirpath), rel_dir, sorted(filenames)
+
+
 def iter_named_files(root: Path, names: Iterable[str]) -> Iterator[Path]:
     """Yield every non-ignored file under root whose name is in `names`, in walk order."""
     wanted = set(names)
-    ignored = ignored_dir_names(root)
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = prune_dirs(dirnames, ignored)
-        for name in sorted(filenames):
+    for dirpath, _, filenames in walk_tree(root):
+        for name in filenames:
             if name in wanted:
-                yield Path(dirpath) / name
+                yield dirpath / name
 
 
 def walk_project(root: Path) -> Tuple[List[SourceFile], int]:
     """Return (source_files, total_file_count), pruning ignored directories.
 
     Minified files (`.min.` in the name) count toward the total but are not source files."""
-    ignored = ignored_dir_names(root)
     source_files: List[SourceFile] = []
     total = 0
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = prune_dirs(dirnames, ignored)
-        for name in sorted(filenames):
-            path = Path(dirpath) / name
+    for dirpath, rel_dir, filenames in walk_tree(root):
+        for name in filenames:
+            path = dirpath / name
             total += 1
             language = SOURCE_EXTENSIONS.get(path.suffix)
             if language is None or ".min." in name:
                 continue
-            rel = path.relative_to(root).as_posix()
+            rel = (rel_dir + "/" + name) if rel_dir else name
             source_files.append(SourceFile(rel, path, language, count_lines(path)))
     return source_files, total

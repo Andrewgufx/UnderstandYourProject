@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from facts.walk import is_test_path, load_gitignore_dirs, walk_project
+from facts.walk import is_test_path, load_gitignore_dirs, load_gitignore_paths, walk_project
 
 
 class TempProject(unittest.TestCase):
@@ -59,6 +59,21 @@ class WalkProjectTests(TempProject):
         self.assertEqual(files[0].read_text(), "print('hi')\n")
         path.unlink()
         self.assertEqual(files[0].read_text(), "print('hi')\n")
+
+
+class GitignoreSubpathTests(TempProject):
+    def test_gitignored_subpath_is_pruned_only_at_that_path(self):
+        self.write(".gitignore", "apps/desktop/target/\n")
+        self.write("apps/desktop/target/x.js", "a")
+        self.write("apps/desktop/src/a.js", "a")
+        self.write("other/target/y.js", "a")
+        files, total = walk_project(self.root)
+        self.assertEqual([f.path for f in files], ["apps/desktop/src/a.js", "other/target/y.js"])
+        self.assertEqual(total, 3)
+
+    def test_load_gitignore_paths_returns_slashed_entries_without_wildcards(self):
+        self.write(".gitignore", "apps/desktop/target/\n/dist\nbuild\n*.log\na/*/b\n")
+        self.assertEqual(load_gitignore_paths(self.root), {"apps/desktop/target"})
 
 
 class GitignoreTests(TempProject):
