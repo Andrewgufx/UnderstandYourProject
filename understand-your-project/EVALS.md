@@ -23,3 +23,5 @@ Record results here with the date:
 
 | Date | Fixture | Pass | Notes |
 |---|---|---|---|
+| 2026-09-30 | monolith-py | fail | Verdict correct (Needs a proper tidy-up). Missing: A2/A3 (checklist cannot fire: layer_mixing has no `ui` category and `main.py` matches no A3 path keyword), D3 (checklist requires non-empty `config_files`, which is empty). A1 reported as should_fix, not must_fix: 709 lines is in the checklist's 501-1000 should_fix band. D1, D2 (must_fix, main.py:6), D4 present; no B1/C1. |
+| 2026-09-30 | clean-next | pass | Zero findings, verdict Healthy, T1 matched. Section 4 has only "no findings" lines; Section 5 has no fix entries and an empty target structure. |
