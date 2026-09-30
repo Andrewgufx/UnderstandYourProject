@@ -9,8 +9,8 @@ from typing import Dict, List
 from .walk import IGNORED_DIRS, SourceFile, is_test_path, load_gitignore_dirs
 
 _SECRET_PATTERNS = [
-    re.compile(r"""(?i)(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['"][A-Za-z0-9_\-]{16,}['"]"""),
-    re.compile(r"""['"](sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16})['"]"""),
+    re.compile(r"""(?i)(api[_-]?key|secret|token|password|passwd)\w*['"]?\s*[:=]\s*['"][^'"\s${}]{16,}['"]"""),
+    re.compile(r"""['"](sk-[A-Za-z0-9_\-]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16})['"]"""),
 ]
 _CONFIG_STEM = re.compile(r"(^|[_\-.])(config|settings|constants|env)([_\-.]|$)", re.IGNORECASE)
 _TOOL_CONFIG = re.compile(r"^[\w\-]+\.config\.[cm]?[jt]s$")

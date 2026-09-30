@@ -32,12 +32,27 @@ class SecretTests(HygieneBase):
         files, _ = walk_project(self.root)
         result = suspected_secrets(files)
         self.assertEqual(result, ["src/auth.py:1", "src/config.ts:2"])
-        self.assertNotIn("hunter2", " ".join(result))
+        for entry in result:
+            self.assertRegex(entry, r"^[^:]+:\d+$")
 
     def test_known_prefixes(self):
         self.write("a.js", 'const t = "ghp_abcdefghijklmnopqrstuvwxyz";\nconst k = "AKIAABCDEFGHIJKLMNOP";\n')
         files, _ = walk_project(self.root)
         self.assertEqual(suspected_secrets(files), ["a.js:1", "a.js:2"])
+
+    def test_common_real_world_forms_are_flagged(self):
+        self.write("a.py", "SECRET_KEY = 'django-insecure-abc123def456ghi789=='\n")
+        self.write("b.json.py", 'cfg = {"password": "P@ssw0rd/with+base64=="}\n')
+        self.write("c.ts", 'const openaiKey = "sk-proj-abcdefghijklmnopqrstuvwxyz0123";\n')
+        self.write("d.py", 'AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"\n')
+        files, _ = walk_project(self.root)
+        self.assertEqual(suspected_secrets(files), ["a.py:1", "b.json.py:1", "c.ts:1", "d.py:1"])
+
+    def test_env_lookups_and_templates_are_not_flagged(self):
+        self.write("a.ts", 'const token = "${process.env.API_TOKEN_VALUE}";\nconst t2 = process.env.TOKEN;\n')
+        self.write("b.py", 'token = os.environ.get("TOKEN")\npassword = f"{settings.PASSWORD_FROM_ENV}"\n')
+        files, _ = walk_project(self.root)
+        self.assertEqual(suspected_secrets(files), [])
 
 
 class DocsTests(HygieneBase):
