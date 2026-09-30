@@ -44,6 +44,15 @@ class WalkProjectTests(TempProject):
         self.assertEqual([f.path for f in files], ["src/a.js"])
         self.assertEqual(total, 2)
 
+    def test_dot_directories_and_minified_files_are_not_source(self):
+        self.write(".claude/skills/x/main.py", "x\n")
+        self.write(".github/scripts/a.py", "x\n")
+        self.write("public/vendor.min.js", "x\n")
+        self.write("src/a.js", "a")
+        files, total = walk_project(self.root)
+        self.assertEqual([f.path for f in files], ["src/a.js"])
+        self.assertEqual(total, 2)
+
     def test_read_text_is_cached_and_tolerant(self):
         path = self.write("a.py", "print('hi')\n")
         files, _ = walk_project(self.root)

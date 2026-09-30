@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from facts.hygiene import find_docs, hygiene, suspected_secrets
+from facts.hygiene import committed_env_files, find_docs, hygiene, suspected_secrets
 from facts.walk import walk_project
 
 
@@ -48,11 +48,40 @@ class SecretTests(HygieneBase):
         files, _ = walk_project(self.root)
         self.assertEqual(suspected_secrets(files), ["a.py:1", "b.json.py:1", "c.ts:1", "d.py:1"])
 
+    def test_urls_are_not_flagged(self):
+        self.write("a.py", 'TOKEN_URL = "https://auth.example.com/oauth/token"\n')
+        self.write("b.ts", 'const secretEndpoint = "http://internal.example.com/secret/rotate";\n')
+        files, _ = walk_project(self.root)
+        self.assertEqual(suspected_secrets(files), [])
+
     def test_env_lookups_and_templates_are_not_flagged(self):
         self.write("a.ts", 'const token = "${process.env.API_TOKEN_VALUE}";\nconst t2 = process.env.TOKEN;\n')
         self.write("b.py", 'token = os.environ.get("TOKEN")\npassword = f"{settings.PASSWORD_FROM_ENV}"\n')
         files, _ = walk_project(self.root)
         self.assertEqual(suspected_secrets(files), [])
+
+
+class CommittedEnvTests(HygieneBase):
+    def test_root_env_files_not_gitignored_are_listed_by_name(self):
+        self.write(".env", "API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456\n")
+        self.write(".env.local", "X=1\n")
+        self.write(".env.example", "X=\n")
+        self.write(".env.sample", "X=\n")
+        self.write(".env.template", "X=\n")
+        self.write("sub/.env", "X=1\n")
+        self.write(".environment", "X=1\n")
+        self.assertEqual(committed_env_files(self.root), [".env", ".env.local"])
+
+    def test_gitignored_env_files_are_not_listed(self):
+        self.write(".env", "X=1\n")
+        self.write(".env.local", "X=1\n")
+        self.write(".env.production", "X=1\n")
+        self.write(".gitignore", "node_modules\n.env\n")
+        self.assertEqual(committed_env_files(self.root), [".env.local", ".env.production"])
+        self.write(".gitignore", ".env.*\n*.env\n")
+        self.assertEqual(committed_env_files(self.root), [])
+        self.write(".gitignore", ".env*\n")
+        self.assertEqual(committed_env_files(self.root), [])
 
 
 class DocsTests(HygieneBase):
@@ -68,6 +97,12 @@ class DocsTests(HygieneBase):
         self.assertEqual(find_docs(self.root), [
             "CLAUDE.md", "README.md", "docs/deep/nested/more.md", "docs/guide.md", "notes/product-prd.md",
         ])
+
+    def test_dot_directories_are_pruned(self):
+        self.write("README.md", "")
+        self.write(".github/design.md", "")
+        self.write(".claude/skills/x/spec.md", "")
+        self.assertEqual(find_docs(self.root), ["README.md"])
 
 
 class HygieneTests(HygieneBase):

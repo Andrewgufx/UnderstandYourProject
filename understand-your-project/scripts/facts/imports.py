@@ -6,9 +6,10 @@ import posixpath
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
-from .walk import SourceFile, is_test_path
+from .project_type import load_package_json
+from .walk import SourceFile, is_test_path, iter_named_files
 
 _JS_PATTERNS = [
     re.compile(r"""\bimport\s+(?:type\s+)?(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]"""),
@@ -74,30 +75,142 @@ def _lenient_json(text: str) -> Optional[dict]:
     return data if isinstance(data, dict) else None
 
 
-def load_path_aliases(root: Path) -> Dict[str, str]:
-    for name in ("tsconfig.json", "jsconfig.json"):
-        path = root / name
-        if not path.is_file():
-            continue
-        data = _lenient_json(path.read_text(encoding="utf-8", errors="replace"))
-        if not data:
-            return {}
-        options = data.get("compilerOptions") or {}
-        base_url = options.get("baseUrl") or "."
-        paths = options.get("paths") or {}
-        aliases: Dict[str, str] = {}
-        for alias, targets in paths.items():
-            if not alias.endswith("*") or not targets:
-                continue
-            target = str(targets[0])
-            if not target.endswith("*"):
-                continue
-            joined = posixpath.normpath(posixpath.join(base_url, target[:-1]))
-            if joined == ".":
-                joined = ""
-            aliases[alias[:-1]] = (joined + "/") if joined and not joined.endswith("/") else joined
+_CONFIG_NAMES = ("tsconfig.json", "jsconfig.json")
+_MAX_CONFIG_DEPTH = 5
+
+# (dir_prefix, aliases, base_url): dir_prefix is the config's directory relative to root
+# ("" for root); alias targets are already joined with dir_prefix and baseUrl.
+AliasConfig = Tuple[str, Dict[str, str], Optional[str]]
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _config_file(target: Path) -> Optional[Path]:
+    """An `extends` or `references` target: a file, a file named without `.json`, or a
+    directory holding a tsconfig.json."""
+    if target.is_dir():
+        candidate = target / "tsconfig.json"
+        return candidate if candidate.is_file() else None
+    if target.is_file():
+        return target
+    if not target.name:
+        return None
+    with_json = target.with_name(target.name + ".json")
+    return with_json if with_json.is_file() else None
+
+
+def _load_options(path: Path, root: Path, depth: int, seen: FrozenSet[Path]):
+    """(paths, base_url, referenced config files) for one config, following `extends`.
+
+    The child's `paths` / `baseUrl` override the parent's. Anything of the wrong type is ignored."""
+    try:
+        key = path.resolve()
+    except OSError:
+        return None, None, []
+    if depth > _MAX_CONFIG_DEPTH or key in seen or not _inside(path, root):
+        return None, None, []
+    seen = seen | {key}
+    try:
+        data = _lenient_json(path.read_text(encoding="utf-8-sig", errors="replace"))
+    except OSError:
+        data = None
+    if data is None:
+        return None, None, []
+    paths: Optional[dict] = None
+    base_url: Optional[str] = None
+    extends = data.get("extends")
+    if isinstance(extends, str) and extends:
+        parent = _config_file(path.parent / extends)
+        if parent is not None:
+            paths, base_url, _ = _load_options(parent, root, depth + 1, seen)
+    options = data.get("compilerOptions")
+    if isinstance(options, dict):
+        if isinstance(options.get("paths"), dict):
+            paths = options["paths"]
+        if isinstance(options.get("baseUrl"), str):
+            base_url = options["baseUrl"]
+    references: List[Path] = []
+    raw_refs = data.get("references")
+    if isinstance(raw_refs, list):
+        for ref in raw_refs:
+            if isinstance(ref, dict) and isinstance(ref.get("path"), str) and ref["path"]:
+                target = _config_file(path.parent / ref["path"])
+                if target is not None:
+                    references.append(target)
+    return paths, base_url, references
+
+
+def _aliases_from(dir_prefix: str, base_url: Optional[str], paths: Optional[dict]) -> Dict[str, str]:
+    aliases: Dict[str, str] = {}
+    if not isinstance(paths, dict):
         return aliases
+    for alias, targets in paths.items():
+        if not isinstance(alias, str) or not alias.endswith("*") or not alias[:-1]:
+            continue
+        if not isinstance(targets, list) or not targets or not isinstance(targets[0], str):
+            continue
+        target = targets[0]
+        if not target.endswith("*"):
+            continue
+        joined = posixpath.normpath(posixpath.join(dir_prefix or ".", base_url or ".", target[:-1]))
+        if joined == ".":
+            joined = ""
+        aliases[alias[:-1]] = (joined + "/") if joined and not joined.endswith("/") else joined
+    return aliases
+
+
+def load_alias_configs(root: Path) -> List[AliasConfig]:
+    """Every non-ignored tsconfig.json / jsconfig.json (tsconfig wins in the same directory),
+    with `extends` merged and `references` folded into the referencing config's directory."""
+    by_dir: Dict[str, Path] = {}
+    for path in iter_named_files(root, _CONFIG_NAMES):
+        rel_dir = path.parent.relative_to(root).as_posix()
+        rel_dir = "" if rel_dir == "." else rel_dir
+        if rel_dir not in by_dir or path.name == "tsconfig.json":
+            by_dir[rel_dir] = path
+    configs: List[AliasConfig] = []
+    for dir_prefix in sorted(by_dir):
+        path = by_dir[dir_prefix]
+        paths, base_url, refs = _load_options(path, root, 0, frozenset())
+        aliases = _aliases_from(dir_prefix, base_url, paths)
+        visited = {path.resolve()}
+        pending = [(ref, 1) for ref in refs]
+        while pending:
+            ref, depth = pending.pop(0)
+            ref_key = ref.resolve()
+            if depth > _MAX_CONFIG_DEPTH or ref_key in visited:
+                continue
+            visited.add(ref_key)
+            ref_paths, ref_base, ref_refs = _load_options(ref, root, 0, frozenset())
+            for alias, target in _aliases_from(dir_prefix, ref_base, ref_paths).items():
+                aliases.setdefault(alias, target)
+            if base_url is None and ref_base is not None:
+                base_url = ref_base
+            pending.extend((nxt, depth + 1) for nxt in ref_refs)
+        configs.append((dir_prefix, aliases, base_url))
+    return configs
+
+
+def load_path_aliases(root: Path) -> Dict[str, str]:
+    """Aliases of the root config only (kept for callers that need just those)."""
+    for dir_prefix, aliases, _ in load_alias_configs(root):
+        if dir_prefix == "":
+            return aliases
     return {}
+
+
+def _config_for(path: str, configs: List[AliasConfig]) -> Optional[AliasConfig]:
+    """The config whose directory is the longest prefix of `path` (configs sorted longest first)."""
+    for config in configs:
+        if config[0] == "" or path.startswith(config[0] + "/"):
+            return config
+    return None
 
 
 JS_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
@@ -131,20 +244,22 @@ def _js_candidates(base: str) -> List[str]:
     return candidates
 
 
-def _resolve_js(spec: str, from_path: str, known: Set[str], aliases: Dict[str, str]) -> Optional[str]:
+def _resolve_js(spec: str, from_path: str, known: Set[str], aliases: Dict[str, str],
+                base_dir: Optional[str] = None) -> Optional[str]:
+    bases: List[str] = []
     if spec.startswith("."):
-        base = posixpath.normpath(posixpath.join(posixpath.dirname(from_path), spec))
+        bases.append(posixpath.normpath(posixpath.join(posixpath.dirname(from_path), spec)))
     else:
-        base = None
-        for prefix, target in aliases.items():
+        for prefix in sorted(aliases, key=len, reverse=True):
             if spec.startswith(prefix):
-                base = posixpath.normpath(target + spec[len(prefix):])
+                bases.append(posixpath.normpath(aliases[prefix] + spec[len(prefix):]))
                 break
-        if base is None:
-            return None
-    for candidate in _js_candidates(base):
-        if candidate in known:
-            return candidate
+        if base_dir is not None:
+            bases.append(posixpath.normpath(posixpath.join(base_dir, spec)))
+    for base in bases:
+        for candidate in _js_candidates(base):
+            if candidate in known:
+                return candidate
     return None
 
 
@@ -176,10 +291,12 @@ def _resolve_py(spec: str, from_path: str, known: Set[str], py_roots: List[str])
 
 
 def resolve_import(spec: str, from_path: str, language: str, known: Set[str],
-                   aliases: Dict[str, str], py_roots: List[str]) -> Optional[str]:
+                   aliases: Dict[str, str], py_roots: List[str],
+                   base_dir: Optional[str] = None) -> Optional[str]:
+    """`base_dir` is the root-relative baseUrl directory tried for bare JS imports after aliases."""
     if language == "python":
         return _resolve_py(spec, from_path, known, py_roots)
-    return _resolve_js(spec, from_path, known, aliases)
+    return _resolve_js(spec, from_path, known, aliases, base_dir)
 
 
 def find_cycles(graph: Dict[str, Set[str]]) -> List[List[str]]:
@@ -229,45 +346,122 @@ def _python_roots(known: Set[str]) -> List[str]:
     return sorted(roots)
 
 
-def _looks_local_py(spec: str, known: Set[str]) -> bool:
+def _looks_local_py(spec: str, top_names: Set[str]) -> bool:
     if spec.startswith("."):
         return True
-    top_names = {p.split("/")[0].split(".")[0] for p in known}
     return spec.split(".")[0] in top_names
+
+
+# Extensions of non-code files that bundlers import (styles, data, images, fonts, media,
+# other component formats). An unresolved import with one of these is not counted.
+_ASSET_EXTS = {
+    "css", "scss", "sass", "less", "json", "svg", "png", "jpg", "jpeg", "gif", "webp", "ico",
+    "avif", "woff", "woff2", "ttf", "otf", "mp3", "mp4", "wav", "webm", "txt", "md", "html",
+    "yaml", "yml", "graphql", "gql", "wasm", "vue", "svelte", "astro",
+}
+_LOCAL_BARE_PREFIXES = ("@/", "~/", "#")
+_MAIN_GUARD = re.compile(r"""if\s+__name__\s*==\s*['"]__main__['"]""")
+
+
+def _is_asset_spec(spec: str) -> bool:
+    return posixpath.splitext(posixpath.basename(spec))[1][1:].lower() in _ASSET_EXTS
+
+
+def _local_dir_names(known: Set[str]) -> Set[str]:
+    """Top-level directory names under root and under `src/` that hold source files."""
+    names: Set[str] = set()
+    for path in known:
+        parts = path.split("/")
+        if len(parts) > 1:
+            names.add(parts[0])
+        if parts[0] == "src" and len(parts) > 2:
+            names.add(parts[1])
+    return names
+
+
+def _counts_as_unresolved_js(spec: str, local_dirs: Set[str]) -> bool:
+    if _is_asset_spec(spec):
+        return False
+    if spec.startswith(".") or spec.startswith(_LOCAL_BARE_PREFIXES):
+        return True
+    return spec.split("/")[0] in local_dirs
+
+
+def _declared_entries(root: Path) -> Set[str]:
+    """Paths named by the root package.json `main` or `bin`, normalized."""
+    data = load_package_json(root)
+    if data is None:
+        return set()
+    values: List[str] = []
+    for key in ("main", "bin"):
+        value = data.get(key)
+        if isinstance(value, str):
+            values.append(value)
+        elif isinstance(value, dict):
+            values.extend(v for v in value.values() if isinstance(v, str))
+    return {posixpath.normpath(v.replace("\\", "/")) for v in values if v}
+
+
+def _script_entries(source_files: List[SourceFile]) -> Set[str]:
+    """Python files that run as scripts (`if __name__ == "__main__"`)."""
+    return {
+        f.path for f in source_files
+        if f.language == "python" and "__main__" in f.read_text() and _MAIN_GUARD.search(f.read_text())
+    }
 
 
 def build_dependency(source_files: List[SourceFile], root: Path) -> Dict:
     known = {f.path for f in source_files}
-    aliases = load_path_aliases(root)
+    configs = sorted(load_alias_configs(root), key=lambda c: (-len(c[0]), c[0]))
     py_roots = _python_roots(known)
+    top_names = {p.split("/")[0].split(".")[0] for p in known}
+    local_dirs = _local_dir_names(known)
     graph: Dict[str, Set[str]] = {f.path: set() for f in source_files}
     unresolved = 0
     for f in source_files:
+        aliases: Dict[str, str] = {}
+        base_dir: Optional[str] = None
+        if f.language != "python":
+            config = _config_for(f.path, configs)
+            if config is not None:
+                aliases = config[1]
+                if config[2] is not None:
+                    base_dir = posixpath.normpath(posixpath.join(config[0] or ".", config[2]))
+                    base_dir = "" if base_dir == "." else base_dir
         for spec in extract_import_specs(f.read_text(), f.language):
-            target = resolve_import(spec, f.path, f.language, known, aliases, py_roots)
+            target = resolve_import(spec, f.path, f.language, known, aliases, py_roots, base_dir)
             if target is None:
                 if f.language == "python":
-                    unresolved += _looks_local_py(spec, known)
-                elif spec.startswith(".") or any(spec.startswith(a) for a in aliases):
+                    unresolved += _looks_local_py(spec, top_names)
+                elif _counts_as_unresolved_js(spec, local_dirs):
                     unresolved += 1
                 continue
             if target != f.path:
                 graph[f.path].add(target)
     in_degree = {path: 0 for path in graph}
-    for targets in graph.values():
+    imported_by = {path: 0 for path in graph}  # importers that are not test files
+    for source, targets in graph.items():
+        source_is_test = is_test_path(source)
         for target in targets:
             in_degree[target] += 1
+            if not source_is_test:
+                imported_by[target] += 1
     edges = [{"from": src, "to": dst} for src in sorted(graph) for dst in sorted(graph[src])]
     most_imported = [
         {"path": path, "imported_by": count}
-        for path, count in sorted(in_degree.items(), key=lambda kv: (-kv[1], kv[0]))
+        for path, count in sorted(imported_by.items(), key=lambda kv: (-kv[1], kv[0]))
         if count > 0
     ][:10]
-    orphans = sorted(p for p, count in in_degree.items() if count == 0 and not is_entry_file(p))
+    entries = _declared_entries(root) | _script_entries(source_files)
+    orphans = sorted(
+        p for p, count in in_degree.items()
+        if count == 0 and not is_entry_file(p) and p not in entries
+    )
     return {
-        "edges": edges,
+        "edge_count": len(edges),
         "most_imported": most_imported,
         "cycles": find_cycles(graph),
         "orphans": orphans,
         "unresolved_imports": unresolved,
+        "edges": edges,
     }

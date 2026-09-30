@@ -5,7 +5,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from facts.imports import build_dependency, extract_import_specs, find_cycles, is_entry_file, load_path_aliases, resolve_import
+from facts.imports import (
+    build_dependency, extract_import_specs, find_cycles, is_entry_file, load_alias_configs,
+    load_path_aliases, resolve_import,
+)
 from facts.walk import walk_project
 
 
@@ -93,6 +96,82 @@ class AliasTests(unittest.TestCase):
             ' "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"], // trailing\n'
             ' "exclude": ["node_modules"]}')
         self.assertEqual(load_path_aliases(self.root), {"@/": "src/"})
+
+
+class AliasConfigTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write(self, rel, text=""):
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def dep(self):
+        files, _ = walk_project(self.root)
+        return build_dependency(files, self.root)
+
+    def edges(self):
+        return {(e["from"], e["to"]) for e in self.dep()["edges"]}
+
+    def test_nested_config_aliases_apply_to_its_directory_only(self):
+        self.write("apps/web/tsconfig.json", '{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}')
+        self.write("apps/web/src/lib/x.ts", "export const x = 1;\n")
+        self.write("apps/web/src/page.tsx", "import { x } from '@/lib/x';\n")
+        self.write("apps/api/src/lib/x.ts", "export const x = 1;\n")
+        self.write("apps/api/src/main.ts", "import { x } from '@/lib/x';\n")
+        self.assertEqual(load_alias_configs(self.root), [("apps/web", {"@/": "apps/web/src/"}, None)])
+        self.assertEqual(load_path_aliases(self.root), {})
+        dep = self.dep()
+        self.assertEqual(dep["edges"], [{"from": "apps/web/src/page.tsx", "to": "apps/web/src/lib/x.ts"}])
+        self.assertEqual(dep["unresolved_imports"], 1)
+
+    def test_references_and_extends_are_followed(self):
+        self.write("tsconfig.json", '{"files": [], "references": [{"path": "./tsconfig.app.json"}, {"path": "./missing"}]}')
+        self.write("tsconfig.app.json", '{"extends": "./tsconfig.base.json", "compilerOptions": {"paths": {"~/*": ["src/*"]}}}')
+        self.write("tsconfig.base.json", '{"compilerOptions": {"baseUrl": ".", "paths": {"@/*": ["lib/*"]}}}')
+        self.write("src/a.ts", "import { b } from '~/b';\n")
+        self.write("src/b.ts", "export const b = 1;\n")
+        self.assertEqual(load_alias_configs(self.root), [("", {"~/": "src/"}, ".")])
+        self.assertIn(("src/a.ts", "src/b.ts"), self.edges())
+
+    def test_extends_cycle_is_bounded(self):
+        self.write("tsconfig.json", '{"extends": "./a.json", "compilerOptions": {"paths": {"@/*": ["src/*"]}}}')
+        self.write("a.json", '{"extends": "./tsconfig.json"}')
+        self.assertEqual(load_path_aliases(self.root), {"@/": "src/"})
+
+    def test_base_url_without_paths_resolves_bare_imports(self):
+        self.write("tsconfig.json", '{"compilerOptions": {"baseUrl": "src"}}')
+        self.write("src/components/Button.tsx", "export const Button = 1;\n")
+        self.write("src/app/page.tsx", "import { Button } from 'components/Button';\nimport React from 'react';\n")
+        dep = self.dep()
+        self.assertEqual(dep["edges"], [{"from": "src/app/page.tsx", "to": "src/components/Button.tsx"}])
+        self.assertEqual(dep["unresolved_imports"], 0)
+
+    def test_star_alias_is_ignored(self):
+        self.write("tsconfig.json", '{"compilerOptions": {"paths": {"*": ["./vendor/*"], "@/*": ["./src/*"]}}}')
+        self.assertEqual(load_path_aliases(self.root), {"@/": "src/"})
+
+    def test_wrong_types_are_ignored_without_error(self):
+        self.write("tsconfig.json", '{"compilerOptions": {"paths": [["@/*", "src/*"]], "baseUrl": 3}, "extends": 5, "references": "x"}')
+        self.write("web/tsconfig.json", '{"compilerOptions": {"paths": {"@/*": "src/*", "~/*": []}}}')
+        self.write("api/tsconfig.json", '{"compilerOptions": []}')
+        self.write("cli/jsconfig.json", '[]')
+        self.assertEqual(load_alias_configs(self.root), [
+            ("", {}, None), ("api", {}, None), ("cli", {}, None), ("web", {}, None),
+        ])
+
+    def test_unmatched_local_looking_bare_imports_are_counted(self):
+        self.write("src/lib/x.ts", "export const x = 1;\n")
+        self.write("src/app/page.tsx",
+                   "import a from '@/nope';\nimport b from '~/nope';\nimport c from '#nope';\n"
+                   "import d from 'lib/nope';\nimport e from 'src/nope';\nimport f from 'lodash';\n"
+                   "import g from '@scope/pkg';\n")
+        self.assertEqual(self.dep()["unresolved_imports"], 5)
 
 
 class ResolveJsTests(unittest.TestCase):
@@ -194,6 +273,53 @@ class BuildDependencyTests(unittest.TestCase):
         self.assertEqual(dep["cycles"], [["src/handlers.js", "src/routes.js", "src/handlers.js"]])
         self.assertEqual(dep["orphans"], ["src/legacy.js"])
         self.assertEqual(dep["unresolved_imports"], 1)
+
+    def test_edges_are_last_and_counted(self):
+        self.write("a.ts", "import './b';\n")
+        self.write("b.ts", "")
+        dep = build_dependency(walk_project(self.root)[0], self.root)
+        self.assertEqual(list(dep)[-1], "edges")
+        self.assertEqual(list(dep)[0], "edge_count")
+        self.assertEqual(dep["edge_count"], 1)
+
+    def test_dotted_module_name_resolves_before_asset_check(self):
+        self.write("src/users.service.ts", "export const s = 1;\n")
+        self.write("src/users.controller.ts", "import { s } from './users.service';\n")
+        dep = build_dependency(walk_project(self.root)[0], self.root)
+        self.assertEqual(dep["edges"], [{"from": "src/users.controller.ts", "to": "src/users.service.ts"}])
+        self.assertEqual(dep["unresolved_imports"], 0)
+
+    def test_asset_imports_are_not_unresolved(self):
+        self.write("tsconfig.json", '{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}')
+        self.write("src/app/layout.tsx",
+                   "import './globals.css';\nimport logo from './logo.svg';\n"
+                   "import data from '@/data/x.json';\nimport { r } from './real';\n")
+        self.write("src/app/real.ts", "export const r = 1;\n")
+        dep = build_dependency(walk_project(self.root)[0], self.root)
+        self.assertEqual(dep["edges"], [{"from": "src/app/layout.tsx", "to": "src/app/real.ts"}])
+        self.assertEqual(dep["unresolved_imports"], 0)
+
+    def test_test_file_importers_do_not_count_in_most_imported(self):
+        self.write("src/a.ts", "export const a = 1;\n")
+        self.write("src/b.ts", "import { a } from './a';\n")
+        self.write("src/a.test.ts", "import { a } from './a';\n")
+        dep = build_dependency(walk_project(self.root)[0], self.root)
+        self.assertEqual(dep["most_imported"], [{"path": "src/a.ts", "imported_by": 1}])
+        self.assertIn({"from": "src/a.test.ts", "to": "src/a.ts"}, dep["edges"])
+
+    def test_main_guard_scripts_are_entries(self):
+        self.write("tools/report.py", 'def run():\n    pass\n\nif __name__ == "__main__":\n    run()\n')
+        self.write("tools/unused.py", "x = 1\n")
+        dep = build_dependency(walk_project(self.root)[0], self.root)
+        self.assertEqual(dep["orphans"], ["tools/unused.py"])
+
+    def test_package_json_main_and_bin_are_entries(self):
+        self.write("package.json", '{"main": "./lib/lib.js", "bin": {"tool": "./bin/tool.js"}}')
+        self.write("lib/lib.js", "module.exports = 1;\n")
+        self.write("bin/tool.js", "console.log(1);\n")
+        self.write("lib/unused.js", "module.exports = 2;\n")
+        dep = build_dependency(walk_project(self.root)[0], self.root)
+        self.assertEqual(dep["orphans"], ["lib/unused.js"])
 
     def test_python_absolute_unresolved_only_counted_when_local_looking(self):
         self.write("app/__init__.py", "")

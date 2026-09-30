@@ -1,4 +1,6 @@
 import sys
+import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -81,6 +83,36 @@ class CyclicNodeTests(unittest.TestCase):
         self.assertEqual(dep["cycles"], [["src/handlers.js", "src/routes.js", "src/handlers.js"]])
         self.assertEqual(dep["orphans"], ["src/legacy.js"])
         self.assertEqual(self.facts["project_type"]["frameworks"], ["express"])
+
+
+class OutOfScopeTests(unittest.TestCase):
+    def test_large_project_skips_per_file_analysis_quickly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            for i in range(801):
+                (root / "src" / ("m%d.ts" % i)).write_text(
+                    "import { x } from './m%d';\nexport const x = 1;\n" % ((i + 1) % 801), encoding="utf-8")
+            start = time.time()
+            facts = collect(root)
+            elapsed = time.time() - start
+        self.assertTrue(facts["scale"]["out_of_scope"])
+        self.assertEqual(facts["dependency"], {
+            "edge_count": 0, "most_imported": [], "cycles": [], "orphans": [],
+            "unresolved_imports": 0, "edges": [], "skipped": "out_of_scope",
+        })
+        self.assertEqual(facts["layer_mixing"], [])
+        self.assertEqual(facts["duplication"], {
+            "similar_filenames": [], "repeated_function_names": [], "skipped": "out_of_scope",
+        })
+        self.assertLess(elapsed, 5)
+
+
+class ProjectNameTests(unittest.TestCase):
+    def test_fixture_names(self):
+        self.assertEqual(collect(FIXTURES / "clean-next")["project_type"]["name"], "clean-next")
+        self.assertEqual(collect(FIXTURES / "monolith-py")["project_type"]["name"], "monolith-py")
+        self.assertEqual(collect(FIXTURES / "monolith-py")["hygiene"]["committed_env_files"], [])
 
 
 if __name__ == "__main__":

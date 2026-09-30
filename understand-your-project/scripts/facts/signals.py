@@ -20,7 +20,7 @@ _SIGNALS = [  # (category, label, pattern)
     ("network", "axios", re.compile(r"\baxios\b")),
     ("network", "requests.", re.compile(r"\brequests\.(get|post|put|delete|patch|request)\(")),
     ("network", "httpx", re.compile(r"\bhttpx\b")),
-    ("network", "urllib", re.compile(r"\burllib\b")),
+    ("network", "urllib", re.compile(r"\burllib\.request\b|\burlopen\(")),
     ("data", "SELECT", re.compile(r"\bSELECT\s+.+?\s+FROM\b")),
     ("data", "INSERT", re.compile(r"\bINSERT\s+INTO\b")),
     ("data", "prisma.", re.compile(r"\bprisma\.")),
@@ -78,23 +78,35 @@ _IGNORED_FUNCS = {
 }
 
 
+_NUMBERED_STEM_KEEP = {"sha", "md", "base", "utf", "web"}
+
+
 def _normalize_stem(path: str) -> str:
     stem = path.rsplit("/", 1)[-1].split(".")[0].lower()
-    stem = re.sub(r"[-_]?v?\d+$", "", stem)
+    # Strip a copy number (`utils2`, `client-v2`) but not digits that are part of the
+    # name (`sha256`, `base64`, `utf8`, `md5`, `web3`).
+    stripped = re.sub(r"[-_]?v?\d+$", "", stem)
+    if len(stripped) > 3 and stripped not in _NUMBERED_STEM_KEEP:
+        stem = stripped
     stem = stem.replace("-", "").replace("_", "")
     return _SYNONYMS.get(stem, stem)
 
 
 def similar_filenames(source_files: List[SourceFile]) -> List[List[str]]:
+    """Groups of files whose normalized names match. A group needs at least two distinct
+    basenames, so the same file name in different feature folders is not reported."""
     groups: Dict[str, List[str]] = defaultdict(list)
     for f in source_files:
-        if is_test_path(f.path):
+        if is_test_path(f.path) or "/migrations/" in "/" + f.path:
             continue
         key = _normalize_stem(f.path)
         if key in _GENERIC_STEMS:
             continue
         groups[key].append(f.path)
-    return sorted(sorted(paths) for paths in groups.values() if len(paths) >= 2)
+    return sorted(
+        sorted(paths) for paths in groups.values()
+        if len({p.rsplit("/", 1)[-1] for p in paths}) >= 2
+    )
 
 
 def repeated_function_names(source_files: List[SourceFile]) -> List[Dict]:

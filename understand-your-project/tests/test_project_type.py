@@ -66,6 +66,33 @@ class ProjectTypeTests(unittest.TestCase):
         self.assertEqual(result["package_managers"], [])
         self.assertEqual(result["detected_from"], [])
 
+    def test_name_from_package_json_then_pyproject_then_directory(self):
+        self.write("main.py", "x\n")
+        self.assertEqual(self.detect()["name"], self.root.name)
+        self.write("pyproject.toml",
+                   '[build-system]\nname = "not-this"\n[tool.poetry]\nname = "poetry-app"\n')
+        self.assertEqual(self.detect()["name"], "poetry-app")
+        self.write("pyproject.toml", '[project]\nname = "py-app"\nversion = "1"\n')
+        self.assertEqual(self.detect()["name"], "py-app")
+        self.write("package.json", json.dumps({"name": "js-app"}))
+        self.assertEqual(self.detect()["name"], "js-app")
+        self.write("package.json", json.dumps({"name": 42}))
+        self.assertEqual(self.detect()["name"], "py-app")
+
+    def test_non_object_package_json_is_treated_as_absent(self):
+        self.write("package.json", "[]")
+        self.write("src/a.js", "x\n")
+        result = self.detect()
+        self.assertEqual(result["frameworks"], [])
+        self.assertFalse(result["monorepo"])
+        self.assertEqual(result["detected_from"], [])
+        self.assertEqual(result["name"], self.root.name)
+
+    def test_bom_prefixed_package_json_is_read(self):
+        path = self.root / "package.json"
+        path.write_bytes(b"\xef\xbb\xbf" + json.dumps({"dependencies": {"next": "14"}}).encode("utf-8"))
+        self.assertEqual(self.detect()["frameworks"], ["next"])
+
 
 if __name__ == "__main__":
     unittest.main()

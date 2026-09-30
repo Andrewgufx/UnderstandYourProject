@@ -5,7 +5,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
+from typing import Iterable, Iterator, List, Optional, Set, Tuple
 
 IGNORED_DIRS = {
     "node_modules", ".git", ".venv", "venv", "env", "__pycache__", "dist",
@@ -74,18 +74,41 @@ def count_lines(path: Path) -> int:
         return 0
 
 
+def ignored_dir_names(root: Path) -> Set[str]:
+    """Directory names pruned everywhere: the built-in list plus plain .gitignore names."""
+    return IGNORED_DIRS | load_gitignore_dirs(root)
+
+
+def prune_dirs(dirnames: List[str], ignored: Set[str]) -> List[str]:
+    """Keep directories that are not ignored and do not start with a dot, sorted."""
+    return sorted(d for d in dirnames if d not in ignored and not d.startswith("."))
+
+
+def iter_named_files(root: Path, names: Iterable[str]) -> Iterator[Path]:
+    """Yield every non-ignored file under root whose name is in `names`, in walk order."""
+    wanted = set(names)
+    ignored = ignored_dir_names(root)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = prune_dirs(dirnames, ignored)
+        for name in sorted(filenames):
+            if name in wanted:
+                yield Path(dirpath) / name
+
+
 def walk_project(root: Path) -> Tuple[List[SourceFile], int]:
-    """Return (source_files, total_file_count), pruning ignored directories."""
-    ignored = IGNORED_DIRS | load_gitignore_dirs(root)
+    """Return (source_files, total_file_count), pruning ignored directories.
+
+    Minified files (`.min.` in the name) count toward the total but are not source files."""
+    ignored = ignored_dir_names(root)
     source_files: List[SourceFile] = []
     total = 0
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in ignored)
+        dirnames[:] = prune_dirs(dirnames, ignored)
         for name in sorted(filenames):
             path = Path(dirpath) / name
             total += 1
             language = SOURCE_EXTENSIONS.get(path.suffix)
-            if language is None:
+            if language is None or ".min." in name:
                 continue
             rel = path.relative_to(root).as_posix()
             source_files.append(SourceFile(rel, path, language, count_lines(path)))

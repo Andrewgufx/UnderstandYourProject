@@ -41,6 +41,11 @@ export default function Page() {
         categories, _ = layer_signals("return <div/>;\n")
         self.assertEqual(categories, ["ui"])
 
+    def test_urllib_parse_alone_is_not_network(self):
+        self.assertEqual(layer_signals("from urllib.parse import quote\nq = urllib.parse.quote(x)\n"), ([], []))
+        self.assertEqual(layer_signals("import urllib.request\n"), (["network"], ["urllib"]))
+        self.assertEqual(layer_signals("r = urlopen(url)\n"), (["network"], ["urllib"]))
+
     def test_typescript_generics_are_not_ui(self):
         text = "export async function load(): Promise<Array<string>> {\n  const r = await fetch('/x');\n  return r.json();\n}\n"
         self.assertEqual(layer_signals(text), (["network"], ["fetch("]))
@@ -70,6 +75,30 @@ class SimilarFilenameTests(unittest.TestCase):
         self.assertEqual(similar_filenames(files), [
             ["src/api/client-v2.ts", "src/api/client.ts"],
             ["src/lib/helpers.ts", "src/utils.ts", "src/utils2.ts"],
+        ])
+
+    def test_digits_that_are_part_of_the_name_are_kept(self):
+        files = [
+            sf("src/sha256.ts", ""), sf("src/sha1.ts", ""), sf("src/sha.ts", ""),
+            sf("src/base64.ts", ""), sf("src/base.ts", ""),
+            sf("src/utf8.ts", ""), sf("src/utf.ts", ""),
+        ]
+        self.assertEqual(similar_filenames(files), [])
+
+    def test_migrations_are_skipped(self):
+        files = [
+            sf("app/migrations/helpers.py", "", "python"),
+            sf("app/migrations/utils.py", "", "python"),
+            sf("migrations/util.py", "", "python"),
+        ]
+        self.assertEqual(similar_filenames(files), [])
+
+    def test_same_basename_in_different_folders_is_not_a_group(self):
+        files = [sf("features/a/api.ts", ""), sf("features/b/api.ts", ""),
+                 sf("src/utils.ts", ""), sf("src/lib/utils.ts", ""), sf("src/utils2.ts", ""),
+                 sf("src/helpers.ts", "")]
+        self.assertEqual(similar_filenames(files), [
+            ["src/helpers.ts", "src/lib/utils.ts", "src/utils.ts", "src/utils2.ts"],
         ])
 
     def test_package_init_files_are_not_grouped(self):

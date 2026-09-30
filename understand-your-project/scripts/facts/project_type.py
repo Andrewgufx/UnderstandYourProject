@@ -5,7 +5,7 @@ import json
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 from .walk import SourceFile
 
@@ -26,15 +26,54 @@ def _read(path: Path) -> str:
         return ""
 
 
-def _js_frameworks(root: Path, detected_from: List[str]) -> Set[str]:
+def load_package_json(root: Path) -> Optional[Dict]:
+    """The root package.json as a dict, or None when it is missing, invalid or not an object."""
     manifest = root / "package.json"
     if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8-sig", errors="replace"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+_PY_TABLE = re.compile(r"^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$")
+_PY_NAME = re.compile(r"^\s*name\s*=\s*[\"']([^\"']+)[\"']")
+
+
+def _pyproject_name(root: Path) -> Optional[str]:
+    path = root / "pyproject.toml"
+    if not path.is_file():
+        return None
+    table = None
+    for line in _read(path).splitlines():
+        header = _PY_TABLE.match(line)
+        if header:
+            table = header.group(1)
+            continue
+        if line.lstrip().startswith("[["):
+            table = None
+            continue
+        if table in ("project", "tool.poetry"):
+            match = _PY_NAME.match(line)
+            if match:
+                return match.group(1)
+    return None
+
+
+def _project_name(root: Path) -> str:
+    data = load_package_json(root)
+    if data is not None and isinstance(data.get("name"), str) and data["name"]:
+        return data["name"]
+    return _pyproject_name(root) or root.name
+
+
+def _js_frameworks(root: Path, detected_from: List[str]) -> Set[str]:
+    data = load_package_json(root)
+    if data is None:
         return set()
     detected_from.append("package.json")
-    try:
-        data = json.loads(_read(manifest))
-    except ValueError:
-        return set()
     deps: Set[str] = set()
     for key in ("dependencies", "devDependencies", "peerDependencies"):
         section = data.get(key) or {}
@@ -84,13 +123,8 @@ def _is_monorepo(root: Path) -> bool:
     for name in ("pnpm-workspace.yaml", "lerna.json", "turbo.json"):
         if (root / name).is_file():
             return True
-    manifest = root / "package.json"
-    if manifest.is_file():
-        try:
-            return "workspaces" in json.loads(_read(manifest))
-        except ValueError:
-            return False
-    return False
+    data = load_package_json(root)
+    return data is not None and "workspaces" in data
 
 
 def detect_project_type(root: Path, source_files: List[SourceFile]) -> Dict:
@@ -102,6 +136,7 @@ def detect_project_type(root: Path, source_files: List[SourceFile]) -> Dict:
     detected_from: List[str] = []
     frameworks = _js_frameworks(root, detected_from) | _py_frameworks(root, detected_from)
     return {
+        "name": _project_name(root),
         "languages": languages,
         "frameworks": sorted(frameworks),
         "package_managers": _package_managers(root),

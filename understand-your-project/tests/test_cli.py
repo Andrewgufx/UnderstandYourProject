@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "collect_facts.py"
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 class CliTests(unittest.TestCase):
@@ -38,6 +39,13 @@ class CliTests(unittest.TestCase):
         proc = self.run_cli("--compact", str(self.root))
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout.count("\n"), 1)
+
+    def test_secret_value_never_appears_in_output(self):
+        proc = self.run_cli(str(FIXTURES / "monolith-py"))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("main.py:6", proc.stdout)
+        self.assertNotIn("sk-abcdefghijklmnopqrstuvwxyz123456", proc.stdout)
+        self.assertNotIn("sk-abcdefghijklmnopqrstuvwxyz123456", proc.stderr)
 
     def test_missing_directory_errors(self):
         proc = self.run_cli(str(self.root / "nope"))
