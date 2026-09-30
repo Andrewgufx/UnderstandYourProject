@@ -108,6 +108,7 @@ agent 严格按五步执行，每步产物是下一步输入。
 {
   "root": "/abs/path",
   "project_type": {
+    "name": "my-app",
     "languages": ["typescript", "python"],
     "frameworks": ["next", "react", "fastapi"],
     "package_managers": ["npm", "pip"],
@@ -129,14 +130,15 @@ agent 严格按五步执行，每步产物是下一步输入。
     {"path": "src/app/page.tsx", "lines": 1870, "language": "typescript"}
   ],
   "dependency": {
-    "edges": [{"from": "src/a.ts", "to": "src/b.ts"}],
+    "edge_count": 1,
     "most_imported": [{"path": "src/lib/utils.ts", "imported_by": 61}],
     "cycles": [["src/a.ts", "src/b.ts", "src/a.ts"]],
     "orphans": ["src/old/legacy.ts"],
-    "unresolved_imports": 12
+    "unresolved_imports": 12,
+    "edges": [{"from": "src/a.ts", "to": "src/b.ts"}]
   },
   "layer_mixing": [
-    {"path": "src/app/page.tsx", "signals": ["jsx", "fetch", "sql"]}
+    {"path": "src/app/page.tsx", "categories": ["ui", "network", "data"], "signals": ["jsx", "fetch(", "SELECT"]}
   ],
   "duplication": {
     "similar_filenames": [["src/utils.ts", "src/utils2.ts", "src/lib/helpers.ts"]],
@@ -154,7 +156,8 @@ agent 严格按五步执行，每步产物是下一步输入。
     "has_lint_config": true,
     "has_format_config": false,
     "suspected_secrets": ["src/config.ts:12"],
-    "config_files": ["src/config.ts", "src/constants.ts", "lib/settings.py"]
+    "config_files": ["src/config.ts", "src/constants.ts", "lib/settings.py"],
+    "committed_env_files": [".env"]
   },
   "docs": ["README.md", "CLAUDE.md", "docs/prd.md"]
 }
@@ -254,8 +257,8 @@ agent 严格按五步执行，每步产物是下一步输入。
 
 | 编号 | 名字 | 证据 | 阈值 | 基础严重程度 |
 |---|---|---|---|---|
-| A1 | 巨型文件 | `largest_files` | 单文件超过 500 行为候选，超过 1000 行必报 | 建议改；超过 1000 行为必须改 |
-| A2 | UI 里直接做数据或网络操作 | `layer_mixing` | 命中 UI 加数据或 UI 加网络 | 建议改 |
+| A1 | 巨型文件 | `largest_files` | 超过 500 行即报；501 到 1000 行建议改，超过 1000 行必须改 | 建议改；超过 1000 行为必须改 |
+| A2 | 同一文件混合 UI、网络、数据中的两类以上 | `layer_mixing` | `layer_mixing` 非空 | 建议改 |
 | A3 | 业务逻辑散在路由或页面里 | `largest_files` 中路径含 `page`、`route`、`views`、`api` 且超过 300 行 | 存在即报 | 建议改 |
 | A4 | 万能 utils | `most_imported` | 单文件被超过 30% 的源文件引用且行数超过 300 | 存在即报 | 建议改 |
 
@@ -273,7 +276,7 @@ agent 严格按五步执行，每步产物是下一步输入。
 |---|---|---|---|---|
 | C1 | 近似文件多份 | `similar_filenames` | 非空 | 建议改 |
 | C2 | 同一逻辑多处复制 | `repeated_function_names` | 非空 | 提示；某个名字出现在超过 5 个文件为建议改 |
-| C3 | 命名风格混乱 | `naming` | 同一类别中次多风格占比超过 20% | 提示 |
+| C3 | 命名风格混乱 | `naming` | 同一类别中次多风格占比超过 20%，且该类别计数总和不少于 10 | 提示 |
 
 **D. 工程卫生**
 
@@ -281,7 +284,7 @@ agent 严格按五步执行，每步产物是下一步输入。
 |---|---|---|---|---|
 | D1 | 没有测试 | `has_tests` | false | 建议改 |
 | D2 | 密钥硬编码 | `suspected_secrets` | 非空 | 必须改（任何档位都不降） |
-| D3 | 缺 .env.example 或 .gitignore | `has_env_example`、`has_gitignore` | 任一 false 且项目有 `config_files` | 建议改 |
+| D3 | 缺 .env.example 或 .gitignore | `has_env_example`、`has_gitignore`、`config_files`、`suspected_secrets`、`committed_env_files` | `has_gitignore` 为 false；或 `has_env_example` 为 false 且 `config_files`、`suspected_secrets`、`committed_env_files` 任一非空 | 建议改 |
 | D4 | 没有 lint 或 format | `has_lint_config`、`has_format_config` | 任一 false | 提示 |
 
 **E. 可演进性**
@@ -347,7 +350,10 @@ agent 严格按五步执行，每步产物是下一步输入。
 | 情况 | 处理 |
 |---|---|
 | `out_of_scope` 为 true | 只做第 1、2、3 节和顶层结构层面的问题（E1、D 维度），明确写出"本版本未逐文件分析" |
-| 识别不出语言或框架 | 跳过参考架构，只跑通用清单，报告里说明 |
+| `out_of_scope` 为 true（脚本侧） | 脚本跳过逐文件部分：`dependency`、`duplication` 列表为空并带 `"skipped": "out_of_scope"`，`layer_mixing` 为空 |
+| `scale.source_files` 为 0 | 告诉用户没有找到支持的源文件（不分析 notebook），停止，不写报告 |
+| 语言不是 JS/TS 或 Python | 只评估 D3，报告里说明本语言无法检查测试、密钥和 lint，跳过参考架构 |
+| 识别不出框架 | 跳过参考架构，只跑通用清单，报告里说明 |
 | 项目无任何文档 | 访谈草稿改为"从代码看，这个项目像是……"，问题不变 |
 | 用户不愿回答访谈 | 使用默认档位，报告顶部标注"以下判断基于默认假设" |
 | 脚本运行失败 | 不降级成 agent 自行数文件，把脚本的具体错误告诉用户并停止 |

@@ -10,7 +10,7 @@ foundation or a growing mess.
 Copy the skill into your Claude Code skills directory:
 
 ```bash
-cp -r understand-your-project ~/.claude/skills/understand-your-project
+rm -rf ~/.claude/skills/understand-your-project && cp -R understand-your-project ~/.claude/skills/understand-your-project
 ```
 
 Requires Python 3.8 or newer. No packages to install.
