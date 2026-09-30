@@ -5,7 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from facts.imports import extract_import_specs, load_path_aliases
+from facts.imports import build_dependency, extract_import_specs, find_cycles, is_entry_file, load_path_aliases, resolve_import
+from facts.walk import walk_project
 
 
 class ExtractJsTests(unittest.TestCase):
@@ -92,6 +93,116 @@ class AliasTests(unittest.TestCase):
             ' "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"], // trailing\n'
             ' "exclude": ["node_modules"]}')
         self.assertEqual(load_path_aliases(self.root), {"@/": "src/"})
+
+
+class ResolveJsTests(unittest.TestCase):
+    known = {"src/a.ts", "src/b/index.tsx", "src/c.js", "src/lib/x.ts"}
+
+    def test_relative_with_extension_guessing(self):
+        self.assertEqual(resolve_import("./a", "src/main.ts", "typescript", self.known, {}, []), "src/a.ts")
+        self.assertEqual(resolve_import("./b", "src/main.ts", "typescript", self.known, {}, []), "src/b/index.tsx")
+        self.assertEqual(resolve_import("../c.js", "src/lib/x.ts", "typescript", self.known, {}, []), "src/c.js")
+
+    def test_js_extension_mapped_to_ts(self):
+        self.assertEqual(resolve_import("./a.js", "src/main.ts", "typescript", self.known, {}, []), "src/a.ts")
+
+    def test_alias(self):
+        self.assertEqual(resolve_import("@/lib/x", "src/app/page.tsx", "typescript", self.known, {"@/": "src/"}, []), "src/lib/x.ts")
+
+    def test_third_party_and_missing(self):
+        self.assertIsNone(resolve_import("react", "src/main.ts", "typescript", self.known, {}, []))
+        self.assertIsNone(resolve_import("./nope", "src/main.ts", "typescript", self.known, {}, []))
+
+
+class ResolvePyTests(unittest.TestCase):
+    known = {"main.py", "utils.py", "app/__init__.py", "app/models.py", "app/api/routes.py", "src/pkg/__init__.py", "src/pkg/core.py"}
+    roots = ["", "src"]
+
+    def test_relative(self):
+        self.assertEqual(resolve_import(".models", "app/api/routes.py", "python", self.known, {}, self.roots), None)
+        self.assertEqual(resolve_import("..models", "app/api/routes.py", "python", self.known, {}, self.roots), "app/models.py")
+        self.assertEqual(resolve_import(".", "app/models.py", "python", self.known, {}, self.roots), "app/__init__.py")
+
+    def test_absolute_from_roots_and_script_dir(self):
+        self.assertEqual(resolve_import("app.models", "main.py", "python", self.known, {}, self.roots), "app/models.py")
+        self.assertEqual(resolve_import("app", "main.py", "python", self.known, {}, self.roots), "app/__init__.py")
+        self.assertEqual(resolve_import("pkg.core", "main.py", "python", self.known, {}, self.roots), "src/pkg/core.py")
+        self.assertEqual(resolve_import("utils", "main.py", "python", self.known, {}, self.roots), "utils.py")
+
+    def test_from_import_falls_back_to_package_or_module(self):
+        self.assertEqual(resolve_import("app.helper_fn", "main.py", "python", self.known, {}, self.roots), "app/__init__.py")
+        self.assertEqual(resolve_import("app.models.Thing", "main.py", "python", self.known, {}, self.roots), "app/models.py")
+        self.assertEqual(resolve_import(".name_in_init", "app/models.py", "python", self.known, {}, self.roots), "app/__init__.py")
+        self.assertIsNone(resolve_import("app.nope.x", "main.py", "python", self.known, {}, self.roots))
+
+    def test_stdlib_is_unresolved(self):
+        self.assertIsNone(resolve_import("os.path", "main.py", "python", self.known, {}, self.roots))
+        self.assertIsNone(resolve_import("os", "main.py", "python", self.known, {}, self.roots))
+
+
+class CycleTests(unittest.TestCase):
+    def test_two_node_cycle(self):
+        graph = {"a": {"b"}, "b": {"a", "c"}, "c": set()}
+        self.assertEqual(find_cycles(graph), [["a", "b", "a"]])
+
+    def test_three_node_cycle_and_no_self_loops(self):
+        graph = {"a": {"b"}, "b": {"c"}, "c": {"a"}, "d": {"d"}}
+        self.assertEqual(find_cycles(graph), [["a", "b", "c", "a"]])
+
+    def test_acyclic(self):
+        self.assertEqual(find_cycles({"a": {"b"}, "b": set()}), [])
+
+
+class EntryFileTests(unittest.TestCase):
+    def test_entries(self):
+        for path in ["src/app/page.tsx", "src/index.ts", "main.py", "manage.py",
+                     "pkg/__init__.py", "next.config.js", "src/types.d.ts",
+                     "tests/test_a.py", "top-level.ts", "src/app/api/x/route.ts"]:
+            self.assertTrue(is_entry_file(path), path)
+
+    def test_non_entries(self):
+        for path in ["src/lib/utils.ts", "app/models.py", "src/components/Button.tsx"]:
+            self.assertFalse(is_entry_file(path), path)
+
+
+class BuildDependencyTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write(self, rel, text=""):
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def test_graph_cycles_orphans_and_unresolved(self):
+        self.write("src/server.js", "const r = require('./routes');\nrequire('express');\n")
+        self.write("src/routes.js", "const h = require('./handlers');\n")
+        self.write("src/handlers.js", "const r = require('./routes');\nrequire('./missing');\n")
+        self.write("src/legacy.js", "module.exports = 1;\n")
+        files, _ = walk_project(self.root)
+        dep = build_dependency(files, self.root)
+        self.assertEqual(dep["edges"], [
+            {"from": "src/handlers.js", "to": "src/routes.js"},
+            {"from": "src/routes.js", "to": "src/handlers.js"},
+            {"from": "src/server.js", "to": "src/routes.js"},
+        ])
+        self.assertEqual(dep["most_imported"][0], {"path": "src/routes.js", "imported_by": 2})
+        self.assertEqual(dep["cycles"], [["src/handlers.js", "src/routes.js", "src/handlers.js"]])
+        self.assertEqual(dep["orphans"], ["src/legacy.js"])
+        self.assertEqual(dep["unresolved_imports"], 1)
+
+    def test_python_absolute_unresolved_only_counted_when_local_looking(self):
+        self.write("app/__init__.py", "")
+        self.write("app/a.py", "import os\nfrom app.nope import x\nfrom app import b\n")
+        self.write("app/b.py", "")
+        files, _ = walk_project(self.root)
+        dep = build_dependency(files, self.root)
+        self.assertEqual(dep["edges"], [{"from": "app/a.py", "to": "app/b.py"}])
+        self.assertEqual(dep["unresolved_imports"], 1)
 
 
 if __name__ == "__main__":
