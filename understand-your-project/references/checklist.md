@@ -23,17 +23,17 @@ severity / what happens if ignored / usual fix.
 - **If ignored:** Every change touches the same file, merge conflicts and regressions pile up, AI edits get sloppy.
 - **Usual fix:** Split by responsibility (routes, data access, business rules, UI) into separate files under a folder named after the feature.
 
-### A2. UI code talks directly to data or network
-- **Plain words:** A screen or component also fetches from the internet or runs database queries itself.
-- **Evidence:** `layer_mixing[]` where `categories` includes `ui` together with `network` or `data`.
-- **Threshold:** any such file.
+### A2. One file mixes screens, network calls and database work
+- **Plain words:** The same file does two or more of: drawing screens, calling the network, talking to the database.
+- **Evidence:** `layer_mixing[]` (the script only lists files that hit two or more of `ui`, `network`, `data`; each entry's `categories` says which).
+- **Threshold:** any entry.
 - **Base severity:** should_fix.
 - **If ignored:** You cannot change where data comes from without rewriting screens; testing the screen requires a live database.
-- **Usual fix:** Move fetching and queries into a `lib/` or `services/` module and call it from the component.
+- **Usual fix:** Split the file so that screen code, network calls and database access each live in their own module (`lib/` or `services/` for the last two).
 
 ### A3. Business logic lives in routes or pages
 - **Plain words:** The rules of your app are written inside the request handlers or page files instead of a place of their own.
-- **Evidence:** `largest_files[]` entries whose path contains `page`, `route`, `views`, `api` or `handlers` and whose `lines` exceed 300.
+- **Evidence:** `largest_files[]` entries with a path segment (a directory name, or the file name without its extension) equal to one of `page pages route routes views api handlers`, and whose `lines` exceed 300. Match whole segments, not substrings: `src/api/users.ts` and `app/page.tsx` match; `src/apiClient.ts` and `rapid/x.py` do not.
 - **Threshold:** any such file.
 - **Base severity:** should_fix.
 - **If ignored:** The same rule gets copied into the next route; fixing it once no longer fixes it everywhere.
@@ -67,7 +67,7 @@ severity / what happens if ignored / usual fix.
 
 ### B3. Dependency direction is inverted
 - **Plain words:** Low-level helper code reaches up and imports from screens or routes.
-- **Evidence:** `dependency.edges[]`. A file's layer is the first path segment (after dropping a leading `src/`) that appears in the layer order; files with no such segment have no layer and their edges are ignored. Use the matched template's layer order from `reference-architectures.md`; if no template matched, use this generic order, low to high: `utils`/`lib`/`shared` < `services`/`db`/`models`/`data` < `components`/`hooks` < `pages`/`app`/`routes`/`api`/`views`. An edge whose `from` layer is lower than its `to` layer is inverted.
+- **Evidence:** `dependency.edges[]`. To find a file's layer, drop a leading `src/`, compare the file name without its extension, and scan the path segments left to right. At each position try the segment joined with the next one (`shared/lib`), then the segment alone. The first hit in the layer order is the file's layer. Files with no hit have no layer and their edges are ignored. Use the matched template's layer order from `reference-architectures.md`; if no template matched, use this generic order, low to high: `utils`/`lib`/`shared` < `services`/`db`/`models`/`data` < `components`/`hooks` < `pages`/`app`/`routes`/`api`/`views`. An edge whose `from` layer is lower than its `to` layer is inverted.
 - **Threshold:** any inverted edge.
 - **Base severity:** should_fix.
 - **If ignored:** Nothing is reusable; the helper cannot be tested without the whole app.
@@ -94,7 +94,7 @@ severity / what happens if ignored / usual fix.
 ### C3. Inconsistent naming
 - **Plain words:** Some files are `userService.ts`, others `user_service.ts`, others `user-service.ts`.
 - **Evidence:** `naming.file_case_styles`, `naming.dir_case_styles`.
-- **Threshold:** within either map, the second most common style is over 20% of the total count.
+- **Threshold:** within either map, the second most common style is over 20% of the total count, and the total classified count in that map is at least 10.
 - **Base severity:** note.
 - **If ignored:** Harder to find files; AI guesses wrong paths.
 - **Usual fix:** Pick one convention per language (kebab-case for JS/TS files, snake_case for Python) and rename gradually.
@@ -111,16 +111,16 @@ severity / what happens if ignored / usual fix.
 
 ### D2. Secrets hard-coded
 - **Plain words:** A password, API key or token is written directly in the code.
-- **Evidence:** `hygiene.suspected_secrets[]` (positions only).
-- **Threshold:** non-empty.
+- **Evidence:** `hygiene.suspected_secrets[]` (positions only) and `hygiene.committed_env_files[]` (root `.env` files that `.gitignore` does not exclude; names only).
+- **Threshold:** either list is non-empty.
 - **Base severity:** must_fix. Never lowered by any tier rule.
 - **If ignored:** Anyone with the code, including public repos and AI logs, has your key.
-- **Usual fix:** Move to environment variables, add `.env` to `.gitignore`, rotate the exposed key.
+- **Usual fix:** Move to environment variables, add `.env` to `.gitignore`, rotate the exposed key, and delete the committed `.env` from git history if it held real keys.
 
 ### D3. Missing `.env.example` or `.gitignore`
 - **Plain words:** No template showing which settings the app needs, or no list of files git should ignore.
-- **Evidence:** `hygiene.has_env_example`, `hygiene.has_gitignore`, `hygiene.config_files`.
-- **Threshold:** either is `false` and `config_files` is non-empty.
+- **Evidence:** `hygiene.has_env_example`, `hygiene.has_gitignore`, `hygiene.config_files`, `hygiene.suspected_secrets`, `hygiene.committed_env_files`.
+- **Threshold:** `has_gitignore` is `false`, or `has_env_example` is `false` and any of `config_files`, `suspected_secrets`, `committed_env_files` is non-empty.
 - **Base severity:** should_fix.
 - **If ignored:** New machines cannot run the app; secrets and build junk get committed.
 - **Usual fix:** Add both files; list every required variable in `.env.example` with placeholder values.
@@ -162,21 +162,28 @@ ceiling is `must_fix`. D2 is never lowered.
 4. `pain_points` contains `breaks_elsewhere`: raise every A and B item by one level.
 5. `pain_points` contains `ai_struggles`: raise A1, A4, E1 by one level.
 6. Final cap, applied after all of the above: if `evolution_tier == frozen`, set every E item to `note`.
-7. Items touched by rules 4 or 5 are listed first within their severity group in the report.
+
+Ordering, not severity: items touched by rules 4 or 5 are listed first within their severity group in the report.
 
 ## Out-of-scope projects
 
 When `scale.out_of_scope` is true, evaluate only D1-D4 and E1 (top-level structure).
-State in the report that per-file analysis was not performed.
+The script skips the import graph, layer mixing and duplication for these projects:
+`dependency` and `duplication` carry `"skipped": "out_of_scope"` with empty lists, and
+`layer_mixing` is empty. State in the report that per-file analysis was not performed.
 
 ## Unreliable dependency data
 
-When `dependency.unresolved_imports` exceeds 30% of the total number of edges plus
-unresolved imports, mark every B item "needs confirmation" and say why. These items
+When `dependency.unresolved_imports` exceeds 30% of `dependency.edge_count` plus
+`dependency.unresolved_imports`, mark every B item "needs confirmation" and say why. These items
 still count toward the verdict at their assigned severity.
 
 ## Projects that are not JS/TS or Python
 
-When `project_type.languages` contains none of `javascript`, `typescript`, `python`,
-evaluate only D1, D2, D3, D4 and E1. No template applies; say in the report that this
-version has reference architectures for JS/TS and Python only.
+When `scale.source_files` is 0, there is nothing to judge: tell the user no supported
+source files were found (notebooks are not analyzed), stop, and write no report.
+
+Otherwise, when `project_type.languages` contains none of `javascript`, `typescript`,
+`python`, evaluate only D3. State in the report that tests, secrets and lint could not
+be checked for this language. No template applies; say in the report that this version
+has reference architectures for JS/TS and Python only.

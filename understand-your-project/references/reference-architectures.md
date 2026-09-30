@@ -29,9 +29,9 @@ src/
     lib/          pure helpers, no React
   config/         environment reading, constants
 ```
-Skip when small: `features/` is unnecessary under about 15 components; keep
-`components/` and `lib/` flat until then.
-Layer order: `shared/lib` < `config` < `shared/components`, `shared/hooks` < `features` < `app`.
+Skip when small: `features/` is unnecessary when `tree` shows fewer than 15 files
+under any `components` directory; keep `components/` and `lib/` flat until then.
+Layer order: `lib`/`shared/lib` < `config` < `components`/`shared/components`, `hooks`/`shared/hooks` < `features` < `app`.
 
 ## T2. Node back-end API
 Matches when `frameworks` contains any of `express fastify nest koa hono`.
@@ -45,7 +45,8 @@ src/
   config/         environment reading
   server.ts       creates the app and starts listening
 ```
-Skip when small: under about 5 routes, `services/` may be one file.
+Skip when small: when `tree` shows fewer than 5 files under `routes`, `services/` may be
+one file.
 Layer order: `lib` < `config` < `db` < `services` < `routes` < `server`.
 
 ## T3. Python back-end API
@@ -63,7 +64,8 @@ tests/
 ```
 Django note: keep Django's per-app layout (`<app>/models.py`, `views.py`, `urls.py`);
 map `services/` to a `services.py` inside each app.
-Skip when small: under about 5 endpoints, `services/` and `api/` may each be one file.
+Skip when small: when `tree` shows fewer than 5 files under `api`, `services/` and
+`api/` may each be one file.
 Layer order: `core` < `db` < `models` < `services` < `api` < `main`.
 
 ## T4. Python scripts or data tool
@@ -79,7 +81,8 @@ Matches when `languages` is only `python` and no web framework is present.
 scripts/          one-off scripts that import the package
 tests/
 ```
-Skip when small: a single-purpose script under about 200 lines can stay one file.
+Skip when small: when `scale.source_files` is 1 and `scale.source_lines` is under 200,
+the script can stay one file.
 Layer order: `config` < `io` < `core` < `cli` < `scripts`.
 
 ## T5. Full-stack single repo
@@ -95,4 +98,4 @@ packages/         code shared by both (types, validation)
 ```
 Skip when small: without a build tool that understands workspaces, `frontend/` and
 `backend/` as two top-level folders is enough.
-Layer order: `packages` < `apps/api` < `apps/web`.
+Layer order: `packages` < `apps/api`, `api`, `backend` < `apps/web`, `web`, `frontend`.

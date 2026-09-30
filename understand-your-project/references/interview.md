@@ -6,11 +6,16 @@ user's conversation language. Ask ONE question per message and wait for the answ
 
 ## Step 1: Draft from existing docs
 
-Read every path listed in `facts.docs` (README, CLAUDE.md, AGENTS.md, docs/, PRD-like
-files). Write a 2-4 sentence draft:
+Read the root README, CLAUDE.md and AGENTS.md first (those present in `facts.docs`).
+Then read at most 5 more files from `facts.docs`, preferring names that contain `prd`,
+`spec`, `requirements` or `design`. Skim for purpose and audience only. Write a 2-4
+sentence draft:
 
 > From what I can see, this project is <what it does>, built with <frameworks>, and
 > seems intended for <who>. Is that right?
+
+If the docs do not say who the project is for, the draft says "for an audience I could
+not tell from the docs" in place of <who>; Q2 settles it.
 
 If `facts.docs` is empty, base the draft on directory names, framework and largest
 files, and open with "From the code alone, this looks like...".
@@ -18,7 +23,8 @@ files, and open with "From the code alone, this looks like...".
 ## Step 2: Four questions, one at a time
 
 **Q1. What is this project for?** Present the draft from Step 1 and ask the user to
-confirm or correct it. Open answer.
+confirm or correct it. Open answer. If the user confirms without restating, `purpose`
+is the draft sentence.
 
 **Q2. Who uses it?** Offer exactly these options:
 - A. Only me
@@ -43,10 +49,13 @@ may apply:
 
 | Field | Value | Source |
 |---|---|---|
-| `purpose` | one sentence in the user's words | Q1 |
+| `purpose` | one sentence in the user's words, or the draft sentence if the user confirmed it without restating | Q1 |
 | `scale_tier` | `personal` (Q2=A), `small_group` (Q2=B), `public` (Q2=C) | Q2 |
 | `evolution_tier` | `frozen` (A), `iterating` (B), `launching` (C), `collaborative` (D). If several chosen, take the heaviest: frozen < iterating < launching < collaborative | Q3 |
-| `pain_points` | list of chosen labels: `breaks_elsewhere`, `ai_struggles`, `slow`, `none`, or free text | Q4 |
+| `pain_points` | list of chosen labels: `breaks_elsewhere` (A), `ai_struggles` (B), `slow` (C), or free text (E). Option D gives `pain_points = []` | Q4 |
+
+If the confirmed draft and the Q2 answer disagree about who uses the project, Q2 wins;
+Section 3 of the report mentions the mismatch in one line.
 
 State the profile back to the user in one short paragraph before analysis begins.
 
