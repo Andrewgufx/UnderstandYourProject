@@ -60,7 +60,7 @@ _SYNONYMS = {
     "helper": "utils", "helpers": "utils", "common": "utils", "misc": "utils",
 }
 _GENERIC_STEMS = {
-    "", "index", "__init__", "page", "layout", "route", "loading", "error",
+    "", "index", "__init__", "init", "page", "layout", "route", "loading", "error",
     "main", "app", "test", "conftest", "setup", "types", "models", "views",
     "urls", "admin", "apps", "tests", "forms", "serializers", "schema",
     "component", "styles", "store", "hooks", "constants", "config", "settings",
@@ -69,7 +69,7 @@ _GENERIC_STEMS = {
 _FUNC_PATTERNS = [
     re.compile(r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)", re.MULTILINE),
     re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>", re.MULTILINE),
-    re.compile(r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(", re.MULTILINE),
+    re.compile(r"^(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(", re.MULTILINE),
 ]
 _IGNORED_FUNCS = {
     "main", "default", "setup", "test", "run", "init", "render", "handler",

@@ -72,6 +72,10 @@ class SimilarFilenameTests(unittest.TestCase):
             ["src/lib/helpers.ts", "src/utils.ts", "src/utils2.ts"],
         ])
 
+    def test_package_init_files_are_not_grouped(self):
+        files = [sf("a/__init__.py", "", "python"), sf("b/__init__.py", "", "python"), sf("c/__init__.py", "", "python")]
+        self.assertEqual(similar_filenames(files), [])
+
 
 class RepeatedFunctionTests(unittest.TestCase):
     def test_names_in_three_or_more_files(self):
@@ -86,6 +90,11 @@ class RepeatedFunctionTests(unittest.TestCase):
         self.assertEqual(repeated_function_names(files), [
             {"name": "formatDate", "files": ["a.ts", "b.ts", "c.py", "d.py"]},
         ])
+
+    def test_indented_methods_are_not_counted(self):
+        body = "class Model:\n    def save(self):\n        pass\n"
+        files = [sf("a.py", body, "python"), sf("b.py", body, "python"), sf("c.py", body, "python")]
+        self.assertEqual(repeated_function_names(files), [])
 
 
 class NamingTests(unittest.TestCase):
