@@ -53,3 +53,104 @@ def layer_mixing(source_files: List[SourceFile]) -> List[Dict]:
         if len(categories) >= 2:
             results.append({"path": f.path, "categories": categories, "signals": labels})
     return results
+
+
+_SYNONYMS = {
+    "util": "utils", "utils": "utils", "utility": "utils", "utilities": "utils",
+    "helper": "utils", "helpers": "utils", "common": "utils", "misc": "utils",
+}
+_GENERIC_STEMS = {
+    "", "index", "__init__", "page", "layout", "route", "loading", "error",
+    "main", "app", "test", "conftest", "setup", "types", "models", "views",
+    "urls", "admin", "apps", "tests", "forms", "serializers", "schema",
+    "component", "styles", "store", "hooks", "constants", "config", "settings",
+    "notfound", "template", "default", "middleware",
+}
+_FUNC_PATTERNS = [
+    re.compile(r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)", re.MULTILINE),
+    re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>", re.MULTILINE),
+    re.compile(r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(", re.MULTILINE),
+]
+_IGNORED_FUNCS = {
+    "main", "default", "setup", "test", "run", "init", "render", "handler",
+    "index", "App", "Page", "Layout", "GET", "POST", "PUT", "DELETE", "PATCH",
+    "generateMetadata", "loader", "action", "middleware",
+}
+
+
+def _normalize_stem(path: str) -> str:
+    stem = path.rsplit("/", 1)[-1].split(".")[0].lower()
+    stem = re.sub(r"[-_]?v?\d+$", "", stem)
+    stem = stem.replace("-", "").replace("_", "")
+    return _SYNONYMS.get(stem, stem)
+
+
+def similar_filenames(source_files: List[SourceFile]) -> List[List[str]]:
+    groups: Dict[str, List[str]] = defaultdict(list)
+    for f in source_files:
+        if is_test_path(f.path):
+            continue
+        key = _normalize_stem(f.path)
+        if key in _GENERIC_STEMS:
+            continue
+        groups[key].append(f.path)
+    return sorted(sorted(paths) for paths in groups.values() if len(paths) >= 2)
+
+
+def repeated_function_names(source_files: List[SourceFile]) -> List[Dict]:
+    where: Dict[str, set] = defaultdict(set)
+    for f in source_files:
+        if is_test_path(f.path):
+            continue
+        text = f.read_text()
+        for pattern in _FUNC_PATTERNS:
+            for match in pattern.finditer(text):
+                name = match.group(1)
+                if name in _IGNORED_FUNCS or name.startswith("__"):
+                    continue
+                where[name].add(f.path)
+    return [
+        {"name": name, "files": sorted(files)}
+        for name, files in sorted(where.items())
+        if len(files) >= 3
+    ]
+
+
+def classify_name(name: str) -> "str | None":
+    name = name.strip("_")
+    if not name:
+        return None
+    if "-" in name:
+        return "kebab-case"
+    if "_" in name:
+        return "snake_case" if name == name.lower() else "mixed"
+    has_upper = any(c.isupper() for c in name)
+    has_lower = any(c.islower() for c in name)
+    if name[0].isupper() and has_lower:
+        return "PascalCase"
+    if name[0].islower() and has_upper:
+        return "camelCase"
+    return None
+
+
+def naming_styles(source_files: List[SourceFile]) -> Dict:
+    file_styles: Counter = Counter()
+    dir_styles: Counter = Counter()
+    seen_dirs = set()
+    for f in source_files:
+        parts = f.path.split("/")
+        style = classify_name(parts[-1].split(".")[0])
+        if style:
+            file_styles[style] += 1
+        for depth in range(1, len(parts)):
+            directory = "/".join(parts[:depth])
+            if directory in seen_dirs:
+                continue
+            seen_dirs.add(directory)
+            style = classify_name(parts[depth - 1])
+            if style:
+                dir_styles[style] += 1
+    return {
+        "file_case_styles": dict(sorted(file_styles.items())),
+        "dir_case_styles": dict(sorted(dir_styles.items())),
+    }
